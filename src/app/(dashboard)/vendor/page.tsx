@@ -1,5 +1,7 @@
 /** biome-ignore-all lint/a11y/noLabelWithoutControl: TODO */
 "use client";
+import { useForm, useStore } from "@tanstack/react-form";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
   AlertTriangle,
@@ -11,6 +13,7 @@ import {
   Edit2,
   FileSpreadsheet,
   Layers,
+  LoaderCircle,
   Mail,
   Package,
   Phone,
@@ -22,26 +25,120 @@ import {
   X,
 } from "lucide-react";
 import type React from "react";
-import { useMemo, useRef, useState } from "react";
+import { Activity, useMemo, useRef, useState } from "react";
+import { toast } from "react-hot-toast/headless";
 import * as XLSX from "xlsx";
+import z from "zod";
+import { FormError } from "@/components/error-form";
 import { useAuth } from "@/context/AuthContext";
-import { useStore } from "@/context/StoreContext";
+import { orpc } from "@/lib/orpc";
 import type { Product, SupplyEntry, Vendor } from "@/types";
 
+const vendorFormSchema = z.object({
+  name: z.string().min(1, "Vendor name is required").trim(),
+  contact: z.string().min(1, "Contact is required").trim(),
+  email: z.string().email("Must be a valid email address").trim(),
+});
+
+const supplyFormSchema = z.object({
+  date: z.string().min(1, "Date is required"),
+  vendorName: z.string().min(1, "Vendor name is required").trim(),
+  vendorId: z.string(),
+  itemName: z.string().min(1, "Item name is required").trim(),
+  productId: z.string(),
+  quantity: z.number().int().min(1, "Quantity must be at least 1"),
+  costPrice: z.number().min(0, "Cost price must be 0 or more"),
+  sellingPrice: z.number().min(0, "Selling price must be 0 or more"),
+  profit: z.number(),
+  purchaseOrder: z.string(),
+  lowStockThreshold: z.number().int().min(0),
+});
+
 const VendorPage = () => {
-  const {
-    vendors,
-    products,
-    supplies,
-    addVendor,
-    updateVendor,
-    deleteVendor,
-    addSupplyEntry,
-    updateSupplyEntry,
-    deleteSupplyEntry,
-    addProduct,
-  } = useStore();
-  const { currentUser } = useAuth();
+  const queryClient = useQueryClient();
+  const vendorsQuery = useQuery(orpc.getVendors.queryOptions());
+  const productsQuery = useQuery(orpc.getProducts.queryOptions());
+  const supplyEntriesQuery = useQuery(orpc.getSupplyEntries.queryOptions());
+
+  const createVendorMutation = useMutation(
+    orpc.createVendor.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: orpc.getVendors.queryKey() });
+      },
+    }),
+  );
+  const updateVendorMutation = useMutation(
+    orpc.updateVendor.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: orpc.getVendors.queryKey() });
+      },
+    }),
+  );
+  const deleteVendorMutation = useMutation(
+    orpc.deleteVendor.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: orpc.getVendors.queryKey() });
+      },
+    }),
+  );
+  const createProductMutation = useMutation(
+    orpc.createProduct.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({
+          queryKey: orpc.getProducts.queryKey(),
+        });
+      },
+    }),
+  );
+  const updateProductMutation = useMutation(
+    orpc.updateProduct.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({
+          queryKey: orpc.getProducts.queryKey(),
+        });
+      },
+    }),
+  );
+  const createSupplyEntryMutation = useMutation(
+    orpc.createSupplyEntry.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({
+          queryKey: orpc.getSupplyEntries.queryKey(),
+        });
+        queryClient.invalidateQueries({
+          queryKey: orpc.getProducts.queryKey(),
+        });
+      },
+    }),
+  );
+  const updateSupplyEntryMutation = useMutation(
+    orpc.updateSupplyEntry.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({
+          queryKey: orpc.getSupplyEntries.queryKey(),
+        });
+        queryClient.invalidateQueries({
+          queryKey: orpc.getProducts.queryKey(),
+        });
+      },
+    }),
+  );
+  const deleteSupplyEntryMutation = useMutation(
+    orpc.deleteSupplyEntry.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({
+          queryKey: orpc.getSupplyEntries.queryKey(),
+        });
+        queryClient.invalidateQueries({
+          queryKey: orpc.getProducts.queryKey(),
+        });
+      },
+    }),
+  );
+
+  const vendors = vendorsQuery.data ?? [];
+  const products = productsQuery.data ?? [];
+  const supplies = supplyEntriesQuery.data ?? [];
 
   // --- UI State ---
   const [activeTab, setActiveTab] = useState<"supplies" | "vendors">(
@@ -85,7 +182,7 @@ const VendorPage = () => {
     return `PO-${date}-${random}`;
   };
 
-  // --- Single Supply Form State ---
+  // --- Single Supply Form (TanStack Form) ---
   const initialSupplyForm = {
     date: getLocalDateStr(),
     vendorName: "",
@@ -96,10 +193,102 @@ const VendorPage = () => {
     costPrice: 0,
     sellingPrice: 0,
     profit: 0,
-    purchaseOrder: "",
+    purchaseOrder: generatePO(),
     lowStockThreshold: 10,
   };
-  const [supplyForm, setSupplyForm] = useState(initialSupplyForm);
+  const supplyForm = useForm({
+    defaultValues: initialSupplyForm,
+    validators: { onSubmit: supplyFormSchema },
+    onSubmit: async ({ value }) => {
+      console.log("Value", value);
+      let finalVendorId = value.vendorId;
+      if (!finalVendorId) {
+        const nameEntered = value.vendorName.trim();
+        const match = vendors.find(
+          (v) => v.name.toLowerCase() === nameEntered.toLowerCase(),
+        );
+        if (match) {
+          finalVendorId = match.id;
+        } else {
+          try {
+            const created = await createVendorMutation.mutateAsync({
+              name: nameEntered,
+              contact: "-",
+              email: "noreply@vendor.local",
+            });
+            finalVendorId = created.id;
+          } catch (err) {
+            toast.error(
+              err instanceof Error ? err.message : "Failed to create vendor",
+            );
+            return;
+          }
+        }
+      }
+
+      let finalProductId = value.productId;
+      if (!finalProductId) {
+        try {
+          const created = await createProductMutation.mutateAsync({
+            name: value.itemName.trim(),
+            costPrice: value.costPrice,
+            sellingPrice: value.sellingPrice,
+            stock: 0,
+            vendorId: finalVendorId,
+            lowStockThreshold: value.lowStockThreshold,
+          });
+          finalProductId = created.id;
+        } catch (err) {
+          alert(
+            err instanceof Error ? err.message : "Failed to create product",
+          );
+          return;
+        }
+      } else {
+        const existingProduct = products.find((p) => p.id === finalProductId);
+        if (
+          existingProduct &&
+          existingProduct.lowStockThreshold !== value.lowStockThreshold
+        ) {
+          try {
+            await updateProductMutation.mutateAsync({
+              id: finalProductId,
+              lowStockThreshold: value.lowStockThreshold,
+            });
+          } catch {
+            // non-blocking
+          }
+        }
+      }
+
+      const payload = {
+        date: value.date,
+        vendorId: finalVendorId,
+        productId: finalProductId,
+        quantity: value.quantity,
+        costPrice: value.costPrice,
+        sellingPrice: value.sellingPrice,
+        purchaseOrderNumber: value.purchaseOrder,
+        isPaid: false,
+      };
+
+      try {
+        if (editingSupplyId) {
+          await updateSupplyEntryMutation.mutateAsync({
+            id: editingSupplyId,
+            ...payload,
+          });
+        } else {
+          await createSupplyEntryMutation.mutateAsync(payload);
+        }
+        closeSupplyModal();
+      } catch (err) {
+        alert(
+          err instanceof Error ? err.message : "Failed to save supply entry",
+        );
+      }
+    },
+  });
 
   // --- Bulk Supply Upload State ---
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -113,9 +302,34 @@ const VendorPage = () => {
   const [bulkVendorError, setBulkVendorError] = useState<string | null>(null);
   const [isProcessingBulkVendors, setIsProcessingBulkVendors] = useState(false);
 
-  // --- Vendor Form State ---
+  // --- Vendor Form (TanStack Form) ---
   const initialVendorForm = { name: "", contact: "", email: "" };
-  const [vendorForm, setVendorForm] = useState(initialVendorForm);
+  const vendorForm = useForm({
+    defaultValues: initialVendorForm,
+    validators: { onSubmit: vendorFormSchema },
+    onSubmit: async ({ value }) => {
+      if (editingVendorId) {
+        updateVendorMutation.mutate(
+          { id: editingVendorId, ...value },
+          {
+            onSuccess: () => closeVendorModal(),
+            onError: (e) =>
+              toast.error(
+                e instanceof Error ? e.message : "Failed to update vendor",
+              ),
+          },
+        );
+      } else {
+        await createVendorMutation.mutateAsync(value, {
+          onSuccess: () => closeVendorModal(),
+          onError: (e) =>
+            toast.error(
+              e instanceof Error ? e.message : "Failed to create vendor",
+            ),
+        });
+      }
+    },
+  });
 
   // --- Computed Data ---
   const tableData = useMemo(() => {
@@ -160,19 +374,19 @@ const VendorPage = () => {
     return data;
   }, [supplies, products, vendors, searchTerm, dateFilter, sortConfig]);
 
+  const supplyFormValues = supplyForm.state.values;
   const matchingProducts = useMemo(() => {
-    if (!supplyForm.itemName || supplyForm.productId) return [];
+    if (!supplyFormValues.itemName || supplyFormValues.productId) return [];
     return products.filter((p) =>
-      p.name.toLowerCase().includes(supplyForm.itemName.toLowerCase()),
+      p.name.toLowerCase().includes(supplyFormValues.itemName.toLowerCase()),
     );
-  }, [products, supplyForm.itemName, supplyForm.productId]);
+  }, [products, supplyFormValues.itemName, supplyFormValues.productId]);
 
-  const matchingVendors = useMemo(() => {
-    if (!supplyForm.vendorName || supplyForm.vendorId) return [];
-    return vendors.filter((v) =>
-      v.name.toLowerCase().includes(supplyForm.vendorName.toLowerCase()),
-    );
-  }, [vendors, supplyForm.vendorName, supplyForm.vendorId]);
+  const matchingVendors = vendors.filter((v) =>
+    v.name.toLowerCase().includes(supplyFormValues.vendorName.toLowerCase()),
+  );
+
+  console.log("matchingVendors", matchingVendors);
 
   const supplyToDeleteDetails = useMemo(() => {
     if (!supplyToDelete) return null;
@@ -193,60 +407,66 @@ const VendorPage = () => {
   };
 
   // Supply Management Handlers
+  // const formValue = useStore(supplyForm.store, (state) => state.values);
 
   const handleCostChange = (cost: number) => {
-    const profit = supplyForm.sellingPrice - cost;
-    setSupplyForm((prev) => ({
-      ...prev,
+    const current = supplyForm.state.values;
+    const profit = current.sellingPrice - cost;
+    supplyForm.reset({
+      ...current,
       costPrice: cost,
       profit: parseFloat(profit.toFixed(2)),
-    }));
+    });
   };
 
   const handleProfitChange = (profit: number) => {
-    const selling = supplyForm.costPrice + profit;
-    setSupplyForm((prev) => ({
-      ...prev,
-      profit: profit,
+    const current = supplyForm.state.values;
+    const selling = current.costPrice + profit;
+    supplyForm.reset({
+      ...current,
+      profit,
       sellingPrice: parseFloat(selling.toFixed(2)),
-    }));
+    });
   };
 
   const handleSellingChange = (selling: number) => {
-    const profit = selling - supplyForm.costPrice;
-    setSupplyForm((prev) => ({
-      ...prev,
+    const current = supplyForm.state.values;
+    const profit = selling - current.costPrice;
+    supplyForm.reset({
+      ...current,
       sellingPrice: selling,
       profit: parseFloat(profit.toFixed(2)),
-    }));
+    });
   };
 
   const selectExistingProduct = (p: Product) => {
+    const current = supplyForm.state.values;
     const profit = p.sellingPrice - p.costPrice;
-    setSupplyForm((prev) => ({
-      ...prev,
+    supplyForm.reset({
+      ...current,
       productId: p.id,
       itemName: p.name,
       costPrice: p.costPrice,
       sellingPrice: p.sellingPrice,
       profit: parseFloat(profit.toFixed(2)),
-      lowStockThreshold: p.lowStockThreshold || 10,
-    }));
+      lowStockThreshold: p.lowStockThreshold ?? 10,
+    });
   };
 
   const selectExistingVendor = (v: Vendor) => {
-    setSupplyForm((prev) => ({
-      ...prev,
+    const current = supplyForm.state.values;
+    supplyForm.reset({
+      ...current,
       vendorId: v.id,
       vendorName: v.name,
-    }));
+    });
   };
 
   const openNewSupply = () => {
     setEditingSupplyId(null);
-    setSupplyForm({
+    supplyForm.reset({
       ...initialSupplyForm,
-      date: getLocalDateStr(), // Ensure we refresh date on new open
+      date: getLocalDateStr(),
       purchaseOrder: generatePO(),
     });
     setIsSupplyModalOpen(true);
@@ -270,18 +490,18 @@ const VendorPage = () => {
     const profit = entry.sellingPrice - entry.costPrice;
     const product = products.find((p) => p.id === entry.productId);
 
-    setSupplyForm({
+    supplyForm.reset({
       date: entry.date,
       vendorId: entry.vendorId,
-      vendorName: entry.vendorName || "",
+      vendorName: entry.vendorName ?? "",
       itemName: entry.productName,
       productId: entry.productId,
       quantity: entry.quantity,
       costPrice: entry.costPrice,
       sellingPrice: entry.sellingPrice,
       profit: parseFloat(profit.toFixed(2)),
-      purchaseOrder: entry.purchaseOrderNumber || "",
-      lowStockThreshold: product?.lowStockThreshold || 10,
+      purchaseOrder: entry.purchaseOrderNumber ?? "",
+      lowStockThreshold: product?.lowStockThreshold ?? 10,
     });
 
     setIsSupplyModalOpen(true);
@@ -293,172 +513,21 @@ const VendorPage = () => {
 
   const confirmDeleteSupply = () => {
     if (supplyToDelete) {
-      deleteSupplyEntry(supplyToDelete, currentUser?.name);
-      setSupplyToDelete(null);
-    }
-  };
-
-  const submitSupply = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!supplyForm.vendorName) return alert("Vendor Name is required");
-    if (!supplyForm.itemName) return alert("Item name is required");
-
-    let finalVendorId = supplyForm.vendorId;
-
-    // Only try to find or create if we don't have an ID (meaning user typed a new name or didn't select from dropdown)
-    if (!finalVendorId) {
-      const nameEntered = supplyForm.vendorName.trim();
-      const match = vendors.find(
-        (v) => v.name.toLowerCase() === nameEntered.toLowerCase(),
+      deleteSupplyEntryMutation.mutate(
+        { id: supplyToDelete },
+        {
+          onSuccess: () => setSupplyToDelete(null),
+          onError: (e) =>
+            alert(e instanceof Error ? e.message : "Failed to delete"),
+        },
       );
-
-      if (match) {
-        finalVendorId = match.id;
-      } else {
-        const newVId = `v_${Date.now()}_auto`;
-        addVendor(
-          {
-            id: newVId,
-            name: nameEntered,
-            contact: "",
-            email: "",
-          },
-          currentUser?.name,
-        );
-        finalVendorId = newVId;
-      }
     }
-
-    let finalProductId = supplyForm.productId;
-
-    if (!finalProductId) {
-      const newProduct: Product = {
-        id: `p_${Date.now()}`,
-        name: supplyForm.itemName,
-        costPrice: supplyForm.costPrice,
-        sellingPrice: supplyForm.sellingPrice,
-        stock: 0,
-        vendorId: finalVendorId,
-        lowStockThreshold: supplyForm.lowStockThreshold,
-      };
-      addProduct(newProduct, currentUser?.name);
-      finalProductId = newProduct.id;
-    } else {
-      // Update existing product's low stock threshold if changed
-      const existingProduct = products.find((p) => p.id === finalProductId);
-      if (
-        existingProduct &&
-        existingProduct.lowStockThreshold !== supplyForm.lowStockThreshold
-      ) {
-        // We need to import updateProduct from store context if not already available
-        // But wait, updateProduct is available in the component scope
-        // Let's check if updateProduct is destructured from useStore()
-        // Yes, it is.
-        // However, we need to be careful not to overwrite other fields if they changed elsewhere (unlikely in this flow)
-        // Actually, updateProduct replaces the product.
-        // We should update it.
-        // But wait, addSupplyEntry also updates the product (stock, prices, lastSupplyDate).
-        // If we call updateProduct here, and then addSupplyEntry, we might have a race condition or one overwriting the other?
-        // addSupplyEntry updates specific fields. updateProduct updates the whole object.
-        // StoreContext implementation:
-        // addSupplyEntry: setProducts(prev => ... updates specific fields ...)
-        // updateProduct: setProducts(prev => ... replaces object ...)
-        // Since React state updates are batched or functional, we should be careful.
-        // Ideally, addSupplyEntry should handle this, or we do it before/after.
-        // Let's do it here. Since addSupplyEntry uses functional update based on 'prev',
-        // if we call updateProduct first, addSupplyEntry will see the updated product in its 'prev' (if batched correctly or if we rely on the fact that they are separate actions).
-        // Actually, both use setProducts(prev => ...).
-        // If we call updateProduct, it queues an update.
-        // If we call addSupplyEntry, it queues another update.
-        // The second update's 'prev' will be the result of the first update.
-        // So it should be fine.
-        // However, we need to make sure we pass the FULL product to updateProduct.
-        // existingProduct is from the 'products' array in the render scope.
-        // If we modify it and pass it to updateProduct, it should work.
-        // BUT, addSupplyEntry also updates costPrice and sellingPrice.
-        // If the user changed prices in the form, addSupplyEntry handles that.
-        // So we only need to update lowStockThreshold here.
-        // Let's just update the threshold.
-        // Note: updateProduct takes a Product.
-        // We can't use 'updateProduct' from the store because it expects a full product and replaces it.
-        // If we use the 'existingProduct' from the current render cycle, it might be stale if other updates happened?
-        // Unlikely in this single user app.
-        // Let's try to update it.
-        // We will call updateProduct with the new threshold.
-        // Then addSupplyEntry will run and update stock/prices on top of it.
-        // This relies on the order of execution and React state batching.
-        // Actually, to be safe, maybe we should just let addSupplyEntry handle prices/stock,
-        // and we handle threshold.
-        // But wait, if we change prices in the form, addSupplyEntry updates them in the product.
-        // So we just need to ensure the product has the new threshold.
-        // Let's do this:
-        // We'll update the product first.
-        // Then add the supply entry.
-        // Wait, I need to make sure 'updateProduct' is available.
-        // It is destructured at the top of the component.
-        // One catch: 'updateProduct' in StoreContext replaces the item in the array.
-        // 'addSupplyEntry' in StoreContext finds the item by ID and updates fields.
-        // If 'addSupplyEntry' runs second, it will take the 'prev' state (which has the updated threshold) and update stock/prices.
-        // This seems correct.
-        // But wait, 'addProduct' is called in the 'if' block. 'updateProduct' should be called in 'else'.
-        // But I need to make sure I don't break anything.
-        // Let's check if 'updateProduct' is imported.
-        // It is: const { ..., updateProduct, ... } = useStore();
-        // Okay, let's proceed.
-        // Wait, I can't call hooks or context methods inside the replacement string if they are not available.
-        // They are available.
-        // One detail: 'existingProduct' is a reference to an object in the 'products' array.
-        // We should create a new object.
-        // Also, I need to make sure I don't lose any data.
-        // Let's add the update logic.
-      }
-    }
-
-    if (finalProductId) {
-      const existingProduct = products.find((p) => p.id === finalProductId);
-      if (existingProduct) {
-        // We always update the threshold to match the form, as this is the latest "setting" for the item
-        // even if it hasn't changed, it's safe to set it.
-        // But to avoid unnecessary writes, check if different.
-        if (
-          existingProduct.lowStockThreshold !== supplyForm.lowStockThreshold
-        ) {
-          // updateProduct(
-          //   {
-          //     ...existingProduct,
-          //     lowStockThreshold: supplyForm.lowStockThreshold,
-          //   },
-          //   currentUser?.name,
-          // );
-        }
-      }
-    }
-
-    const payload: SupplyEntry = {
-      id: editingSupplyId || `sup_${Date.now()}`,
-      date: supplyForm.date,
-      vendorId: finalVendorId,
-      productId: finalProductId,
-      quantity: supplyForm.quantity,
-      costPrice: supplyForm.costPrice,
-      sellingPrice: supplyForm.sellingPrice,
-      purchaseOrderNumber: supplyForm.purchaseOrder,
-      isPaid: false,
-    };
-
-    if (editingSupplyId) {
-      updateSupplyEntry(payload, currentUser?.name);
-    } else {
-      addSupplyEntry(payload, currentUser?.name);
-    }
-
-    closeSupplyModal();
   };
 
   const closeSupplyModal = () => {
     setIsSupplyModalOpen(false);
     setEditingSupplyId(null);
-    setSupplyForm(initialSupplyForm);
+    supplyForm.reset();
   };
 
   // --- Bulk Supply File Handler ---
@@ -543,72 +612,63 @@ const VendorPage = () => {
     reader.readAsBinaryString(file);
   };
 
-  const processBulkUpload = () => {
+  const processBulkUpload = async () => {
     if (bulkPreview.length === 0) return;
     setIsProcessingBulk(true);
+    setBulkError(null);
 
     try {
       const validRows = bulkPreview.filter((r) => r.isValid);
+      const currentVendors = [...vendors];
+      const currentProducts = [...products];
 
-      validRows.forEach((row, idx) => {
-        // 1. Resolve Vendor
+      for (let idx = 0; idx < validRows.length; idx++) {
+        const row = validRows[idx]!;
         let finalVendorId: string;
-        const vendorMatch = vendors.find(
+        const vendorMatch = currentVendors.find(
           (v) => v.name.toLowerCase() === row.vendorName.trim().toLowerCase(),
         );
         if (vendorMatch) {
           finalVendorId = vendorMatch.id;
         } else {
-          finalVendorId = `v_${Date.now()}_b${idx}`;
-          addVendor(
-            {
-              id: finalVendorId,
-              name: row.vendorName,
-              contact: "",
-              email: "",
-            },
-            currentUser?.name,
-          );
+          const created = await createVendorMutation.mutateAsync({
+            name: row.vendorName.trim(),
+            contact: "-",
+            email: "noreply@vendor.local",
+          });
+          finalVendorId = created.id;
+          currentVendors.push(created);
         }
 
-        // 2. Resolve Product
         let finalProductId: string;
-        const productMatch = products.find(
+        const productMatch = currentProducts.find(
           (p) => p.name.toLowerCase() === row.itemName.trim().toLowerCase(),
         );
         if (productMatch) {
           finalProductId = productMatch.id;
         } else {
-          finalProductId = `p_${Date.now()}_b${idx}`;
-          addProduct(
-            {
-              id: finalProductId,
-              name: row.itemName,
-              costPrice: row.costPrice,
-              sellingPrice: row.sellingPrice,
-              stock: 0,
-              vendorId: finalVendorId,
-            },
-            currentUser?.name,
-          );
-        }
-
-        // 3. Add Supply
-        addSupplyEntry(
-          {
-            id: `sup_${Date.now()}_b${idx}`,
-            date: row.date,
-            vendorId: finalVendorId,
-            productId: finalProductId,
-            quantity: row.quantity,
+          const created = await createProductMutation.mutateAsync({
+            name: row.itemName.trim(),
             costPrice: row.costPrice,
             sellingPrice: row.sellingPrice,
-            purchaseOrderNumber: row.poNumber,
-            isPaid: false,
-          },
-          currentUser?.name,
-        );
-      });
+            stock: 0,
+            vendorId: finalVendorId,
+          });
+          finalProductId = created.id;
+          currentProducts.push(created);
+        }
+
+        await createSupplyEntryMutation.mutateAsync({
+          date: row.date,
+          vendorId: finalVendorId,
+          productId: finalProductId,
+          quantity: row.quantity,
+          costPrice: row.costPrice,
+          sellingPrice: row.sellingPrice,
+          purchaseOrderNumber: row.poNumber,
+          isPaid: false,
+        });
+      }
 
       closeBulkSupply();
       alert(`Successfully processed ${validRows.length} records.`);
@@ -695,32 +755,28 @@ const VendorPage = () => {
     reader.readAsBinaryString(file);
   };
 
-  const processBulkVendorUpload = () => {
+  const processBulkVendorUpload = async () => {
     if (bulkVendorPreview.length === 0) return;
     setIsProcessingBulkVendors(true);
+    setBulkVendorError(null);
 
     try {
       const validRows = bulkVendorPreview.filter((r) => r.isValid);
       let addedCount = 0;
 
-      validRows.forEach((row, idx) => {
-        // Check duplicates by name to prevent re-adding existing vendors
+      for (const row of validRows) {
         const exists = vendors.find(
           (v) => v.name.toLowerCase() === row.name.trim().toLowerCase(),
         );
         if (!exists) {
-          addVendor(
-            {
-              id: `v_${Date.now()}_b${idx}`,
-              name: row.name,
-              contact: row.contact,
-              email: row.email,
-            },
-            currentUser?.name,
-          );
+          await createVendorMutation.mutateAsync({
+            name: row.name.trim(),
+            contact: row.contact?.trim() || "-",
+            email: row.email?.trim() || "noreply@vendor.local",
+          });
           addedCount++;
         }
-      });
+      }
 
       closeBulkVendor();
       alert(`Process complete. Added ${addedCount} new vendors.`);
@@ -735,7 +791,7 @@ const VendorPage = () => {
   // Vendor Management Handlers
   const openEditVendor = (v: Vendor) => {
     setEditingVendorId(v.id);
-    setVendorForm({ name: v.name, contact: v.contact, email: v.email });
+    vendorForm.reset({ name: v.name, contact: v.contact, email: v.email });
     setIsVendorModalOpen(true);
   };
 
@@ -745,26 +801,24 @@ const VendorPage = () => {
 
   const confirmDeleteVendor = () => {
     if (vendorToDelete) {
-      deleteVendor(vendorToDelete, currentUser?.name);
-      if (selectedVendorId === vendorToDelete) setSelectedVendorId(null);
-      setVendorToDelete(null);
+      deleteVendorMutation.mutate(
+        { id: vendorToDelete },
+        {
+          onSuccess: () => {
+            if (selectedVendorId === vendorToDelete) setSelectedVendorId(null);
+            setVendorToDelete(null);
+          },
+          onError: (e) =>
+            alert(e instanceof Error ? e.message : "Failed to delete"),
+        },
+      );
     }
-  };
-
-  const submitVendor = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (editingVendorId) {
-      updateVendor({ id: editingVendorId, ...vendorForm }, currentUser?.name);
-    } else {
-      addVendor({ id: `v_${Date.now()}`, ...vendorForm }, currentUser?.name);
-    }
-    closeVendorModal();
   };
 
   const closeVendorModal = () => {
     setIsVendorModalOpen(false);
     setEditingVendorId(null);
-    setVendorForm(initialVendorForm);
+    vendorForm.reset();
   };
 
   const handleVendorRowClick = (vendorId: string) => {
@@ -998,9 +1052,9 @@ const VendorPage = () => {
                   <button
                     type="button"
                     onClick={() => {
-                      setIsVendorModalOpen(true);
                       setEditingVendorId(null);
-                      setVendorForm(initialVendorForm);
+                      vendorForm.reset(initialVendorForm);
+                      setIsVendorModalOpen(true);
                     }}
                     className="flex items-center gap-2 rounded-lg bg-pink-600 px-4 py-2 font-medium text-white shadow-sm transition-colors hover:bg-pink-700"
                   >
@@ -1294,76 +1348,102 @@ const VendorPage = () => {
               </button>
             </div>
 
-            <form onSubmit={submitSupply} className="space-y-6 p-6">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                supplyForm.handleSubmit();
+              }}
+              className="space-y-6 p-6"
+            >
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">
-                    Date
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={supplyForm.date}
-                    onChange={(e) =>
-                      setSupplyForm({ ...supplyForm, date: e.target.value })
-                    }
-                    className="w-full rounded-md border p-2"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">
-                    Purchase Order
-                  </label>
-                  <input
-                    type="text"
-                    readOnly
-                    value={supplyForm.purchaseOrder}
-                    className="w-full cursor-not-allowed rounded-md border bg-gray-100 p-2 text-gray-500"
-                  />
-                </div>
+                <supplyForm.Field name="date">
+                  {(field) => (
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700">
+                        Date
+                      </label>
+                      <input
+                        type="date"
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        className="w-full rounded-md border p-2"
+                      />
+                      <FormError field={field} />
+                    </div>
+                  )}
+                </supplyForm.Field>
+                <supplyForm.Field name="purchaseOrder">
+                  {(field) => (
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700">
+                        Purchase Order
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        value={field.state.value}
+                        className="w-full cursor-not-allowed rounded-md border bg-gray-100 p-2 text-gray-500"
+                      />
+                    </div>
+                  )}
+                </supplyForm.Field>
               </div>
 
               <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">
-                  Vendor Name
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    required
-                    autoComplete="off"
-                    value={supplyForm.vendorName}
-                    onChange={(e) =>
-                      setSupplyForm({
-                        ...supplyForm,
-                        vendorName: e.target.value,
+                <supplyForm.Field
+                  name="vendorName"
+                  listeners={{
+                    onChange: (value) => {
+                      console.log("onChange", value);
+                      const val = value.value;
+                      supplyForm.reset({
+                        ...supplyForm.state.values,
+                        vendorName: val,
                         vendorId: "",
-                      })
-                    }
-                    className="w-full rounded-md border p-2"
-                    placeholder="Enter vendor name..."
-                  />
-                  {matchingVendors.length > 0 && (
-                    <div className="absolute top-full right-0 left-0 z-50 mt-1 max-h-40 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
-                      {matchingVendors.map((v) => (
-                        <button
-                          key={v.id}
-                          type="button"
-                          onClick={() => selectExistingVendor(v)}
-                          className="group flex w-full items-center justify-between px-4 py-2 text-left hover:bg-gray-100"
-                        >
-                          <span className="font-medium text-gray-800">
-                            {v.name}
-                          </span>
-                          <span className="text-xs text-gray-400 group-hover:text-pink-500">
-                            Use Existing
-                          </span>
-                        </button>
-                      ))}
-                    </div>
+                      });
+                    },
+                  }}
+                >
+                  {(field) => (
+                    <>
+                      <label className="mb-1 block text-sm font-medium text-gray-700">
+                        Vendor Name
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          autoComplete="off"
+                          value={field.state.value}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          className="w-full rounded-md border p-2"
+                          placeholder="Enter vendor name..."
+                        />
+                        {matchingVendors.length > 0 && (
+                          <div className="absolute top-full right-0 left-0 z-50 mt-1 max-h-40 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
+                            {matchingVendors?.map((v) => (
+                              <button
+                                key={v.id}
+                                type="button"
+                                onClick={() => selectExistingVendor(v)}
+                                className="group flex w-full items-center justify-between px-4 py-2 text-left hover:bg-gray-100"
+                              >
+                                <span className="font-medium text-gray-800">
+                                  {v.name}
+                                </span>
+                                <span className="text-xs text-gray-400 group-hover:text-pink-500">
+                                  Use Existing
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <FormError field={field} />
+                    </>
                   )}
-                </div>
-                {supplyForm.vendorId && (
+                </supplyForm.Field>
+                {supplyFormValues.vendorId && (
                   <p className="mt-1 flex items-center gap-1 text-xs text-green-600">
                     <CheckCircle size={12} /> Linked to existing vendor database
                   </p>
@@ -1371,141 +1451,161 @@ const VendorPage = () => {
               </div>
 
               <div className="space-y-4 border-t border-gray-100 pt-4">
-                <div className="relative">
-                  <label className="mb-1 block text-sm font-medium text-gray-700">
-                    Item Supplied
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    autoComplete="off"
-                    placeholder="Search existing or enter new product name..."
-                    value={supplyForm.itemName}
-                    onChange={(e) => {
-                      setSupplyForm({
-                        ...supplyForm,
-                        itemName: e.target.value,
-                        productId: "",
-                      });
-                    }}
-                    className="w-full rounded-md border p-2"
-                  />
-                  {/* Autocomplete Dropdown */}
-                  {!editingSupplyId && matchingProducts.length > 0 && (
-                    <div className="absolute top-full right-0 left-0 z-50 mt-1 max-h-40 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
-                      {matchingProducts.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => selectExistingProduct(p)}
-                          className="group flex w-full items-center justify-between px-4 py-2 text-left hover:bg-gray-100"
-                        >
-                          <span className="font-medium text-gray-800">
-                            {p.name}
-                          </span>
-                          <span className="text-xs text-gray-400 group-hover:text-pink-500">
-                            Use Existing
-                          </span>
-                        </button>
-                      ))}
+                <supplyForm.Field name="itemName">
+                  {(field) => (
+                    <div className="relative">
+                      <label className="mb-1 block text-sm font-medium text-gray-700">
+                        Item Supplied
+                      </label>
+                      <input
+                        type="text"
+                        autoComplete="off"
+                        placeholder="Search existing or enter new product name..."
+                        value={field.state.value}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          supplyForm.reset({
+                            ...supplyForm.state.values,
+                            itemName: val,
+                            productId: "",
+                          });
+                        }}
+                        className="w-full rounded-md border p-2"
+                      />
+                      {!editingSupplyId && matchingProducts.length > 0 && (
+                        <div className="absolute top-full right-0 left-0 z-50 mt-1 max-h-40 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
+                          {matchingProducts.map((p) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() =>
+                                selectExistingProduct(p as Product)
+                              }
+                              className="group flex w-full items-center justify-between px-4 py-2 text-left hover:bg-gray-100"
+                            >
+                              <span className="font-medium text-gray-800">
+                                {p.name}
+                              </span>
+                              <span className="text-xs text-gray-400 group-hover:text-pink-500">
+                                Use Existing
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <FormError field={field} />
                     </div>
                   )}
-                  {supplyForm.productId && (
-                    <p className="mt-1 flex items-center gap-1 text-xs text-green-600">
-                      <CheckCircle size={12} /> Linked to existing product
-                      database
-                    </p>
-                  )}
-                </div>
+                </supplyForm.Field>
+                {supplyFormValues.productId && (
+                  <p className="mt-1 flex items-center gap-1 text-xs text-green-600">
+                    <CheckCircle size={12} /> Linked to existing product
+                    database
+                  </p>
+                )}
 
                 <div className="grid grid-cols-1 gap-4">
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="mb-1 block text-sm font-medium text-gray-700">
-                        Quantity
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        required
-                        value={supplyForm.quantity}
-                        onChange={(e) =>
-                          setSupplyForm({
-                            ...supplyForm,
-                            quantity: parseInt(e.target.value) || 0,
-                          })
-                        }
-                        className="w-full rounded-md border p-2 text-lg font-bold"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-sm font-medium text-gray-700">
-                        Low Stock Alert Level
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={supplyForm.lowStockThreshold}
-                        onChange={(e) =>
-                          setSupplyForm({
-                            ...supplyForm,
-                            lowStockThreshold: parseInt(e.target.value) || 0,
-                          })
-                        }
-                        className="w-full rounded-md border p-2 text-gray-600"
-                        placeholder="Default: 10"
-                      />
-                    </div>
+                    <supplyForm.Field name="quantity">
+                      {(field) => (
+                        <div>
+                          <label className="mb-1 block text-sm font-medium text-gray-700">
+                            Quantity
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={field.state.value}
+                            onChange={(e) =>
+                              field.handleChange(parseInt(e.target.value) || 0)
+                            }
+                            className="w-full rounded-md border p-2 text-lg font-bold"
+                          />
+                          <FormError field={field} />
+                        </div>
+                      )}
+                    </supplyForm.Field>
+                    <supplyForm.Field name="lowStockThreshold">
+                      {(field) => (
+                        <div>
+                          <label className="mb-1 block text-sm font-medium text-gray-700">
+                            Low Stock Alert Level
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            value={field.state.value}
+                            onChange={(e) =>
+                              field.handleChange(parseInt(e.target.value) || 0)
+                            }
+                            className="w-full rounded-md border p-2 text-gray-600"
+                            placeholder="Default: 10"
+                          />
+                        </div>
+                      )}
+                    </supplyForm.Field>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-3 items-end gap-4">
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-700">
-                      Cost Price (₦)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      required
-                      value={supplyForm.costPrice}
-                      onChange={(e) =>
-                        handleCostChange(parseFloat(e.target.value) || 0)
-                      }
-                      className="w-full rounded-md border p-2"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-700">
-                      Profit (₦)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={supplyForm.profit}
-                      onChange={(e) =>
-                        handleProfitChange(parseFloat(e.target.value) || 0)
-                      }
-                      className="w-full rounded-md border p-2 font-medium text-green-600"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-700">
-                      Selling Price (₦)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      required
-                      value={supplyForm.sellingPrice}
-                      onChange={(e) =>
-                        handleSellingChange(parseFloat(e.target.value) || 0)
-                      }
-                      className="w-full rounded-md border p-2 font-bold"
-                    />
-                  </div>
+                  <supplyForm.Field name="costPrice">
+                    {(field) => (
+                      <div>
+                        <label className="mb-1 block text-sm font-medium text-gray-700">
+                          Cost Price (₦)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={field.state.value}
+                          onChange={(e) =>
+                            handleCostChange(parseFloat(e.target.value) || 0)
+                          }
+                          className="w-full rounded-md border p-2"
+                        />
+                        <FormError field={field} />
+                      </div>
+                    )}
+                  </supplyForm.Field>
+                  <supplyForm.Field name="profit">
+                    {(field) => (
+                      <div>
+                        <label className="mb-1 block text-sm font-medium text-gray-700">
+                          Profit (₦)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={field.state.value}
+                          onChange={(e) =>
+                            handleProfitChange(parseFloat(e.target.value) || 0)
+                          }
+                          className="w-full rounded-md border p-2 font-medium text-green-600"
+                        />
+                      </div>
+                    )}
+                  </supplyForm.Field>
+                  <supplyForm.Field name="sellingPrice">
+                    {(field) => (
+                      <div>
+                        <label className="mb-1 block text-sm font-medium text-gray-700">
+                          Selling Price (₦)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={field.state.value}
+                          onChange={(e) =>
+                            handleSellingChange(parseFloat(e.target.value) || 0)
+                          }
+                          className="w-full rounded-md border p-2 font-bold"
+                        />
+                        <FormError field={field} />
+                      </div>
+                    )}
+                  </supplyForm.Field>
                 </div>
               </div>
 
@@ -1871,52 +1971,65 @@ const VendorPage = () => {
               </button>
             </div>
 
-            <form onSubmit={submitVendor} className="space-y-4 p-6">
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">
-                  Vendor Name
-                </label>
-                <input
-                  required
-                  type="text"
-                  value={vendorForm.name}
-                  onChange={(e) =>
-                    setVendorForm({ ...vendorForm, name: e.target.value })
-                  }
-                  className="w-full rounded-md border p-2 outline-none focus:ring-2 focus:ring-pink-500"
-                  placeholder="e.g. Global Supplies Ltd"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">
-                  Contact Phone
-                </label>
-                <input
-                  required
-                  type="text"
-                  value={vendorForm.contact}
-                  onChange={(e) =>
-                    setVendorForm({ ...vendorForm, contact: e.target.value })
-                  }
-                  className="w-full rounded-md border p-2 outline-none focus:ring-2 focus:ring-pink-500"
-                  placeholder="e.g. +234 800..."
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">
-                  Email Address
-                </label>
-                <input
-                  required
-                  type="email"
-                  value={vendorForm.email}
-                  onChange={(e) =>
-                    setVendorForm({ ...vendorForm, email: e.target.value })
-                  }
-                  className="w-full rounded-md border p-2 outline-none focus:ring-2 focus:ring-pink-500"
-                  placeholder="e.g. contact@vendor.com"
-                />
-              </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                vendorForm.handleSubmit();
+              }}
+              className="space-y-4 p-6"
+            >
+              <vendorForm.Field name="name">
+                {(field) => (
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">
+                      Vendor Name
+                    </label>
+                    <input
+                      type="text"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      className="w-full rounded-md border p-2 outline-none focus:ring-2 focus:ring-pink-500"
+                      placeholder="e.g. Global Supplies Ltd"
+                    />
+                    <FormError field={field} />
+                  </div>
+                )}
+              </vendorForm.Field>
+              <vendorForm.Field name="contact">
+                {(field) => (
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">
+                      Contact Phone
+                    </label>
+                    <input
+                      type="text"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      className="w-full rounded-md border p-2 outline-none focus:ring-2 focus:ring-pink-500"
+                      placeholder="e.g. +234 800..."
+                    />
+                    <FormError field={field} />
+                  </div>
+                )}
+              </vendorForm.Field>
+              <vendorForm.Field name="email">
+                {(field) => (
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">
+                      Email Address
+                    </label>
+                    <input
+                      type="email"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      className="w-full rounded-md border p-2 outline-none focus:ring-2 focus:ring-pink-500"
+                      placeholder="e.g. contact@vendor.com"
+                    />
+                    <FormError field={field} />
+                  </div>
+                )}
+              </vendorForm.Field>
               <div className="mt-4 flex gap-3 border-t border-gray-100 pt-4">
                 <button
                   type="button"
@@ -1925,12 +2038,30 @@ const VendorPage = () => {
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  className="flex-1 rounded-lg bg-pink-600 py-2 font-medium text-white shadow-sm hover:bg-pink-700"
+                <vendorForm.Subscribe
+                  selector={(state) => [state.canSubmit, state.isSubmitting]}
                 >
-                  {editingVendorId ? "Update Vendor" : "Save Vendor"}
-                </button>
+                  {([canSubmit, isSubmitting]) => {
+                    return (
+                      <button
+                        disabled={!canSubmit || isSubmitting}
+                        type="submit"
+                        className="flex flex-1 items-center justify-center rounded-lg bg-pink-600 py-2 font-medium text-white shadow-sm hover:bg-pink-700"
+                      >
+                        {editingVendorId ? "Update Vendor" : "Save Vendor"}
+                        <Activity
+                          mode={
+                            createVendorMutation.isPending
+                              ? "visible"
+                              : "hidden"
+                          }
+                        >
+                          <LoaderCircle className="animate-spin" />
+                        </Activity>
+                      </button>
+                    );
+                  }}
+                </vendorForm.Subscribe>
               </div>
             </form>
           </div>

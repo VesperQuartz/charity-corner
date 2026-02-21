@@ -1,7 +1,8 @@
 /** biome-ignore-all lint/a11y/noLabelWithoutControl: <explanation> */
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useForm } from "@tanstack/react-form";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { jsPDF } from "jspdf";
 import {
   AlertTriangle,
@@ -17,11 +18,28 @@ import {
   Trash2,
 } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
+import z from "zod";
+import { FormError } from "@/components/error-form";
 import { useAuth } from "@/context/AuthContext";
-import { useStore } from "@/context/StoreContext";
 import { orpc } from "@/lib/orpc";
 import { InsertProduct } from "@/repo/schema";
-import { CartItem, PaymentMethod, Product, Transaction } from "@/types";
+import { CartItem, PaymentMethod, Transaction } from "@/types";
+
+const paymentFormSchema = z
+  .object({
+    paymentMethod: z.nativeEnum(PaymentMethod),
+    amountTendered: z.string(),
+    debtorName: z.string(),
+  })
+  .refine(
+    (data) =>
+      data.paymentMethod !== PaymentMethod.CREDIT ||
+      data.debtorName.trim().length > 0,
+    {
+      message: "Debtor name is required for store credit.",
+      path: ["debtorName"],
+    },
+  );
 
 // Helper component to handle quantity input state
 // Allows the field to be empty while typing without breaking the number type in parent
@@ -74,29 +92,269 @@ const QuantityInput = ({
   );
 };
 
+type CreateTransactionResult = {
+  id: string;
+  date: string;
+  items: {
+    productId: string;
+    name: string;
+    quantity: number;
+    priceAtSale: number;
+  }[];
+  subtotal: number;
+  total: number;
+  paymentMethod: string;
+  cashierId: string;
+  debtorName?: string;
+};
+
+type CreateTransactionVars = {
+  items: {
+    productId: string;
+    name: string;
+    quantity: number;
+    priceAtSale: number;
+  }[];
+  subtotal: number;
+  total: number;
+  paymentMethod: "CASH" | "TRANSFER" | "POS" | "CREDIT";
+  debtorName?: string | null;
+};
+
+interface CreateTransactionMutation {
+  mutate: (
+    variables: CreateTransactionVars,
+    options?: {
+      onSuccess?: (data: CreateTransactionResult) => void;
+      onError?: (error: Error) => void;
+    },
+  ) => void;
+  isPending: boolean;
+}
+
+// Payment modal with its own form so defaultValues (e.g. amountTendered = total) are correct when opened
+const PaymentModalForm = ({
+  total,
+  cart,
+  onSuccess,
+  onCancel,
+  createTransactionMutation,
+}: {
+  total: number;
+  cart: CartItem[];
+  onSuccess: (data: CreateTransactionResult) => void;
+  onCancel: () => void;
+  createTransactionMutation: CreateTransactionMutation;
+}) => {
+  const paymentForm = useForm({
+    defaultValues: {
+      paymentMethod: PaymentMethod.CASH,
+      amountTendered: total.toString(),
+      debtorName: "",
+    },
+    validators: {
+      onSubmit: paymentFormSchema,
+    },
+    onSubmit: ({ value }) => {
+      createTransactionMutation.mutate(
+        {
+          items: cart.map((c) => ({
+            productId: String(c.id),
+            name: c.name,
+            quantity: c.quantity,
+            priceAtSale: c.sellingPrice,
+          })),
+          subtotal: cart.reduce((s, i) => s + i.sellingPrice * i.quantity, 0),
+          total,
+          paymentMethod: value.paymentMethod,
+          debtorName:
+            value.paymentMethod === PaymentMethod.CREDIT
+              ? value.debtorName
+              : undefined,
+        },
+        {
+          onSuccess: (data) => {
+            onSuccess(data);
+            paymentForm.reset();
+          },
+          onError: (error) => {
+            alert(
+              error instanceof Error
+                ? error.message
+                : "Failed to process transaction",
+            );
+          },
+        },
+      );
+    },
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-2xl">
+        <div className="bg-pink-600 p-6 text-white">
+          <h2 className="mb-1 text-2xl font-bold">
+            Total: ₦{total.toFixed(2)}
+          </h2>
+          <p className="opacity-90">
+            Select payment method to complete transaction
+          </p>
+        </div>
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            paymentForm.handleSubmit();
+          }}
+          className="space-y-6 p-6"
+        >
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { id: PaymentMethod.CASH, icon: Banknote, label: "Cash" },
+              { id: PaymentMethod.POS, icon: CreditCard, label: "Card / POS" },
+              {
+                id: PaymentMethod.TRANSFER,
+                icon: Smartphone,
+                label: "Transfer",
+              },
+              {
+                id: PaymentMethod.CREDIT,
+                icon: Receipt,
+                label: "Store Credit",
+              },
+            ].map((method) => (
+              <paymentForm.Field key={method.id} name="paymentMethod">
+                {(field) => (
+                  <button
+                    type="button"
+                    onClick={() => field.setValue(method.id)}
+                    className={`flex flex-col items-center justify-center rounded-lg border-2 p-4 transition-all ${field.state.value === method.id ? "border-pink-600 bg-pink-50 text-pink-700" : "border-gray-200 hover:border-gray-300"}`}
+                  >
+                    <method.icon size={24} className="mb-2" />
+                    <span className="font-medium">{method.label}</span>
+                  </button>
+                )}
+              </paymentForm.Field>
+            ))}
+          </div>
+
+          <paymentForm.Field name="paymentMethod">
+            {(paymentMethodField) =>
+              paymentMethodField.state.value === PaymentMethod.CASH ? (
+                <paymentForm.Field name="amountTendered">
+                  {(field) => (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-gray-700">
+                        Amount Tendered
+                      </label>
+                      <div className="relative">
+                        <span className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-500">
+                          ₦
+                        </span>
+                        <input
+                          type="number"
+                          value={field.state.value}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          className="w-full rounded-lg border border-gray-300 py-2 pr-4 pl-8 focus:ring-2 focus:ring-pink-500 focus:outline-none"
+                        />
+                      </div>
+                      <div className="mt-2 flex items-center justify-between rounded-lg bg-gray-100 p-3">
+                        <span className="font-medium text-gray-600">
+                          Change Due:
+                        </span>
+                        <span className="text-lg font-bold text-green-600">
+                          ₦
+                          {Math.max(
+                            0,
+                            (parseFloat(field.state.value) || 0) - total,
+                          ).toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </paymentForm.Field>
+              ) : null
+            }
+          </paymentForm.Field>
+
+          <paymentForm.Field name="paymentMethod">
+            {(paymentMethodField) =>
+              paymentMethodField.state.value === PaymentMethod.CREDIT ? (
+                <paymentForm.Field name="debtorName">
+                  {(field) => (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-gray-700">
+                        Debtor Name <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        placeholder="Enter full name"
+                        className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:ring-2 focus:ring-pink-500 focus:outline-none"
+                      />
+                      <FormError field={field} />
+                    </div>
+                  )}
+                </paymentForm.Field>
+              ) : null
+            }
+          </paymentForm.Field>
+
+          <div className="mt-6 flex gap-3">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="flex-1 rounded-lg py-3 font-medium text-gray-700 hover:bg-gray-100"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={createTransactionMutation.isPending}
+              className="flex-1 rounded-lg bg-pink-600 py-3 font-bold text-white shadow-md hover:bg-pink-700 disabled:opacity-50"
+            >
+              {createTransactionMutation.isPending
+                ? "Processing..."
+                : "Confirm Payment"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
 const POS = () => {
+  const queryClient = useQueryClient();
   const products = useQuery(orpc.getProducts.queryOptions());
-  const { processTransaction } = useStore();
-  const { currentUser } = useAuth();
-  const [searchTerm, setSearchTerm] = useState("");
+  const createTransactionMutation = useMutation(
+    orpc.createTransaction.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({
+          queryKey: orpc.getProducts.queryKey(),
+        });
+      },
+    }),
+  );
   const [cart, setCart] = useState<CartItem[]>([]);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [amountTendered, setAmountTendered] = useState<string>("");
-  const [debtorName, setDebtorName] = useState<string>("");
-  const [selectedPaymentMethod, setSelectedPaymentMethod] =
-    useState<PaymentMethod>(PaymentMethod.CASH);
   const [lastTransaction, setLastTransaction] = useState<Transaction | null>(
     null,
   );
-
-  // State for delete confirmation
   const [itemToDelete, setItemToDelete] = useState<CartItem | null>(null);
 
+  const searchForm = useForm({
+    defaultValues: { searchTerm: "" },
+  });
+
   const filteredProducts = useMemo(() => {
+    const term = searchForm.state.values.searchTerm ?? "";
     return products.data?.filter((p) =>
-      p.name.toLowerCase().includes(searchTerm.toLowerCase()),
+      p.name.toLowerCase().includes(term.toLowerCase()),
     );
-  }, [products, searchTerm]);
+  }, [products, searchForm.state.values.searchTerm]);
 
   const addToCart = (product: InsertProduct) => {
     setCart((prev) => {
@@ -159,35 +417,33 @@ const POS = () => {
   const handleCheckout = () => {
     if (cart.length === 0) return;
     setShowPaymentModal(true);
-    setAmountTendered(total.toString());
-    setDebtorName("");
   };
 
-  const finalizeTransaction = () => {
-    if (selectedPaymentMethod === PaymentMethod.CREDIT && !debtorName.trim()) {
-      alert("Please enter the debtor's name for store credit.");
-      return;
-    }
-
-    const newTxn: Transaction = {
-      id: `txn_${Date.now()}`,
-      date: new Date().toISOString(),
-      items: cart?.map((c) => ({
-        productId: c.id,
-        name: c.name,
-        quantity: c.quantity,
-        priceAtSale: c.sellingPrice,
-      })),
-      subtotal,
-      total,
-      paymentMethod: selectedPaymentMethod,
-      cashierId: currentUser?.id || "unknown",
-      debtorName:
-        selectedPaymentMethod === PaymentMethod.CREDIT ? debtorName : undefined,
-    };
-
-    processTransaction(newTxn, currentUser?.name);
-    setLastTransaction(newTxn);
+  const handlePaymentSuccess = (data: {
+    id: string;
+    date: string;
+    items: {
+      productId: string;
+      name: string;
+      quantity: number;
+      priceAtSale: number;
+    }[];
+    subtotal: number;
+    total: number;
+    paymentMethod: string;
+    cashierId: string;
+    debtorName?: string;
+  }) => {
+    setLastTransaction({
+      id: data.id,
+      date: data.date,
+      items: data.items,
+      subtotal: data.subtotal,
+      total: data.total,
+      paymentMethod: data.paymentMethod as PaymentMethod,
+      cashierId: data.cashierId,
+      debtorName: data.debtorName,
+    });
     setCart([]);
     setShowPaymentModal(false);
   };
@@ -334,19 +590,23 @@ const POS = () => {
       {/* Product Grid */}
       <div className="flex flex-1 flex-col gap-4">
         <div className="rounded-lg bg-white p-4 shadow-sm">
-          <div className="relative">
-            <Search
-              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
-              size={20}
-            />
-            <input
-              type="text"
-              placeholder="Search products..."
-              className="w-full rounded-lg border border-gray-300 py-2 pr-4 pl-10 focus:ring-2 focus:ring-pink-500 focus:outline-none"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
+          <searchForm.Field name="searchTerm">
+            {(field) => (
+              <div className="relative">
+                <Search
+                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
+                  size={20}
+                />
+                <input
+                  type="text"
+                  placeholder="Search products..."
+                  className="w-full rounded-lg border border-gray-300 py-2 pr-4 pl-10 focus:ring-2 focus:ring-pink-500 focus:outline-none"
+                  value={field.state.value}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                />
+              </div>
+            )}
+          </searchForm.Field>
         </div>
 
         <div className="grid grid-cols-2 gap-4 overflow-y-auto pb-4 md:grid-cols-3 lg:grid-cols-4">
@@ -401,18 +661,20 @@ const POS = () => {
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
-                    onClick={() => updateQuantity(item.id, -1)}
+                    onClick={() => updateQuantity(String(item.id), -1)}
                     className="rounded p-1 text-gray-500 hover:bg-gray-100"
                   >
                     <Minus size={16} />
                   </button>
                   <QuantityInput
                     quantity={item.quantity}
-                    onUpdate={(newQty) => setItemQuantityExact(item.id, newQty)}
+                    onUpdate={(newQty) =>
+                      setItemQuantityExact(String(item.id), newQty)
+                    }
                   />
                   <button
                     type="button"
-                    onClick={() => updateQuantity(item.id, 1)}
+                    onClick={() => updateQuantity(String(item.id), 1)}
                     className="rounded p-1 text-gray-500 hover:bg-gray-100"
                   >
                     <Plus size={16} />
@@ -452,114 +714,13 @@ const POS = () => {
 
       {/* Payment Modal */}
       {showPaymentModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-2xl">
-            <div className="bg-pink-600 p-6 text-white">
-              <h2 className="mb-1 text-2xl font-bold">
-                Total: ₦{total.toFixed(2)}
-              </h2>
-              <p className="opacity-90">
-                Select payment method to complete transaction
-              </p>
-            </div>
-
-            <div className="space-y-6 p-6">
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { id: PaymentMethod.CASH, icon: Banknote, label: "Cash" },
-                  {
-                    id: PaymentMethod.POS,
-                    icon: CreditCard,
-                    label: "Card / POS",
-                  },
-                  {
-                    id: PaymentMethod.TRANSFER,
-                    icon: Smartphone,
-                    label: "Transfer",
-                  },
-                  {
-                    id: PaymentMethod.CREDIT,
-                    icon: Receipt,
-                    label: "Store Credit",
-                  },
-                ].map((method) => (
-                  <button
-                    type="button"
-                    key={method.id}
-                    onClick={() => setSelectedPaymentMethod(method.id)}
-                    className={`flex flex-col items-center justify-center p-4 rounded-lg border-2 transition-all ${selectedPaymentMethod === method.id ? "border-pink-600 bg-pink-50 text-pink-700" : "border-gray-200 hover:border-gray-300"}`}
-                  >
-                    <method.icon size={24} className="mb-2" />
-                    <span className="font-medium">{method.label}</span>
-                  </button>
-                ))}
-              </div>
-
-              {selectedPaymentMethod === PaymentMethod.CASH && (
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700">
-                    Amount Tendered
-                  </label>
-                  <div className="relative">
-                    <span className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-500">
-                      ₦
-                    </span>
-                    <input
-                      type="number"
-                      value={amountTendered}
-                      onChange={(e) => setAmountTendered(e.target.value)}
-                      className="w-full rounded-lg border border-gray-300 py-2 pr-4 pl-8 focus:ring-2 focus:ring-pink-500 focus:outline-none"
-                    />
-                  </div>
-                  <div className="mt-2 flex items-center justify-between rounded-lg bg-gray-100 p-3">
-                    <span className="font-medium text-gray-600">
-                      Change Due:
-                    </span>
-                    <span className="text-lg font-bold text-green-600">
-                      ₦
-                      {Math.max(
-                        0,
-                        (parseFloat(amountTendered) || 0) - total,
-                      ).toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {selectedPaymentMethod === PaymentMethod.CREDIT && (
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700">
-                    Debtor Name <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={debtorName}
-                    onChange={(e) => setDebtorName(e.target.value)}
-                    placeholder="Enter full name"
-                    className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:ring-2 focus:ring-pink-500 focus:outline-none"
-                  />
-                </div>
-              )}
-
-              <div className="mt-6 flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowPaymentModal(false)}
-                  className="flex-1 rounded-lg py-3 font-medium text-gray-700 hover:bg-gray-100"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={finalizeTransaction}
-                  className="flex-1 rounded-lg bg-pink-600 py-3 font-bold text-white shadow-md hover:bg-pink-700"
-                >
-                  Confirm Payment
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <PaymentModalForm
+          total={total}
+          cart={cart}
+          onSuccess={handlePaymentSuccess}
+          onCancel={() => setShowPaymentModal(false)}
+          createTransactionMutation={createTransactionMutation}
+        />
       )}
 
       {/* Delete Confirmation Modal */}

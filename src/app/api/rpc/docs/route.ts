@@ -7,6 +7,7 @@ import { headers } from "next/headers";
 import type { NextRequest } from "next/server";
 import router from "@/lib/orpc/router";
 import { todoSchema } from "@/lib/orpc/schema";
+import { selectVendorSchema } from "@/repo/schema";
 
 const handler = new OpenAPIHandler(router, {
   interceptors: [
@@ -27,6 +28,7 @@ const handler = new OpenAPIHandler(router, {
         },
         commonSchemas: {
           Todo: { schema: todoSchema },
+          Vendor: { schema: selectVendorSchema },
           UndefinedError: { error: "UndefinedError" },
         },
         security: [{ bearerAuth: [] }],
@@ -56,7 +58,7 @@ async function handle(request: NextRequest) {
   const { response } = await handler.handle(request, {
     prefix: "/api",
     context: {
-      headers: await headers(),
+      reqHeaders: await headers(),
     },
   });
 

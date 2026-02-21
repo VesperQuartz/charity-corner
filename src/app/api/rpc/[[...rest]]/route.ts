@@ -3,7 +3,11 @@ import {
   CompressionPlugin,
   RPCHandler,
 } from "@orpc/server/fetch";
-import { BatchHandlerPlugin, CORSPlugin, RequestHeadersPlugin } from "@orpc/server/plugins";
+import {
+  BatchHandlerPlugin,
+  CORSPlugin,
+  RequestHeadersPlugin,
+} from "@orpc/server/plugins";
 import { headers } from "next/headers";
 import router from "@/lib/orpc/router";
 
@@ -26,8 +30,8 @@ async function handleRequest(request: Request) {
   const { response } = await handler.handle(request, {
     prefix: "/api/rpc",
     context: {
-      headers: await headers(),
-    }, // Provide initial context if needed
+      reqHeaders: await headers(),
+    },
   });
 
   return response ?? new Response("Not found", { status: 404 });
