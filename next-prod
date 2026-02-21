@@ -1,0 +1,12 @@
+#!/bin/env bash
+
+if [[ -e "$PWD/.next/standalone" ]]; then
+  echo "it exist"
+  if command -v rsync >/dev/null; then
+    rsync -saP "$PWD/.next/standalone" "$PWD/"
+    rsync -saP "$PWD/public" "$PWD/standalone/"
+    rsync -saP "$PWD/.next/static" "$PWD/standalone/.next/"
+  fi
+else
+  exit 1
+fi
