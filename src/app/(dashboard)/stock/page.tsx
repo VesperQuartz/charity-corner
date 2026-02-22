@@ -1,35 +1,65 @@
-/** biome-ignore-all lint/a11y/noLabelWithoutControl: <explanation> */
+/** biome-ignore-all lint/a11y/noLabelWithoutControl: TODO */
 "use client";
 
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Calendar,
   Edit2,
   Filter,
+  LoaderCircle,
   Package,
   Save,
   Search,
   X,
 } from "lucide-react";
-import React, { useMemo, useState } from "react";
+import React, { Activity, useMemo, useState, useTransition } from "react";
+import { toast } from "react-hot-toast/headless";
 import { useAuth } from "@/context/AuthContext";
-import { useStore } from "@/context/StoreContext";
-import { Product, UserRole } from "@/types";
+import { orpc } from "@/lib/orpc";
+import type { Product } from "@/types";
 
 const Stock = () => {
-  const { products, vendors, transactions, supplies, updateProduct } =
-    useStore();
+  const queryClient = useQueryClient();
   const { currentUser } = useAuth();
-  const isAdmin = currentUser?.role === UserRole.ADMIN;
+  const isAdmin = currentUser?.role === "admin";
+  const [isPending, startTransition] = useTransition();
 
-  const [searchTerm, setSearchTerm] = useState("");
-  const [vendorFilter, setVendorFilter] = useState("");
-  const [sortKey, setSortKey] = useState<"name" | "stock" | "vendor" | "price">(
-    "stock",
+  const productsQuery = useQuery(orpc.getProducts.queryOptions());
+  const vendorsQuery = useQuery(orpc.getVendors.queryOptions());
+  const transactionsQuery = useQuery(orpc.getTransactions.queryOptions());
+  const supplyEntriesQuery = useQuery(orpc.getSupplyEntries.queryOptions());
+
+  const updateProductMutation = useMutation(
+    orpc.updateProduct.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({
+          queryKey: orpc.getProducts.queryKey(),
+        });
+        toast.success("Product updated successfully");
+        setEditingProduct(null);
+      },
+      onError: (err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Failed to update product",
+        );
+      },
+    }),
   );
 
+  const products = productsQuery.data ?? [];
+  const vendors = vendorsQuery.data ?? [];
+  const transactions = transactionsQuery.data ?? [];
+  const supplies = supplyEntriesQuery.data ?? [];
+
+  const [searchTerm, setSearchTerm] = useState("");
+  const [vendorFilter, setVendorFilter] = React.useState("");
+  const [sortKey, setSortKey] = React.useState<
+    "name" | "stock" | "vendor" | "price"
+  >("stock");
+
   // Default to today's local date
-  const [dateFilter, setDateFilter] = useState(() => {
+  const [dateFilter, setDateFilter] = React.useState(() => {
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, "0");
@@ -38,8 +68,10 @@ const Stock = () => {
   });
 
   // Edit State
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [editForm, setEditForm] = useState<{
+  const [editingProduct, setEditingProduct] = React.useState<Product | null>(
+    null,
+  );
+  const [editForm, setEditForm] = React.useState<{
     name: string;
     sellingPrice: number;
     costPrice: number;
@@ -48,7 +80,8 @@ const Stock = () => {
   const getVendorName = (id: string) =>
     vendors.find((v) => v.id === id)?.name || "Unknown Vendor";
 
-  const processedProducts = () => {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Cause Rerenders
+  const processedProductsList = React.useMemo(() => {
     // 1. Calculate Historical Stock
     const [y, m, d] = dateFilter.split("-").map(Number);
     const targetDateEnd = new Date(y, m - 1, d, 23, 59, 59, 999);
@@ -82,7 +115,7 @@ const Stock = () => {
     });
 
     // 2. Filter & Sort
-    let data = products
+    const data = products
       .map((p) => ({
         ...p,
         stock: Math.max(0, stockMap.get(p.id) || 0),
@@ -108,7 +141,15 @@ const Stock = () => {
     });
 
     return data;
-  };
+  }, [
+    products,
+    transactions,
+    supplies,
+    dateFilter,
+    searchTerm,
+    vendorFilter,
+    sortKey,
+  ]);
 
   const handleEditClick = (p: Product) => {
     setEditingProduct(p);
@@ -121,16 +162,14 @@ const Stock = () => {
 
   const handleSaveEdit = () => {
     if (editingProduct) {
-      updateProduct(
-        {
-          ...editingProduct,
+      startTransition(async () => {
+        await updateProductMutation.mutateAsync({
+          id: editingProduct.id,
           name: editForm.name,
           sellingPrice: editForm.sellingPrice,
           costPrice: editForm.costPrice,
-        },
-        currentUser?.name,
-      );
-      setEditingProduct(null);
+        });
+      });
     }
   };
 
@@ -237,7 +276,22 @@ const Stock = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {processedProducts.length === 0 ? (
+              {productsQuery.isLoading ? (
+                <tr>
+                  <td
+                    colSpan={isAdmin ? 5 : 4}
+                    className="px-6 py-12 text-center text-gray-400"
+                  >
+                    <div className="flex flex-col items-center justify-center">
+                      <LoaderCircle
+                        className="mb-4 animate-spin opacity-20"
+                        size={48}
+                      />
+                      <p className="text-lg">Loading inventory...</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : processedProductsList.length === 0 ? (
                 <tr>
                   <td
                     colSpan={isAdmin ? 5 : 4}
@@ -252,7 +306,7 @@ const Stock = () => {
                   </td>
                 </tr>
               ) : (
-                processedProducts?.map((product) => {
+                processedProductsList.map((product) => {
                   return (
                     <tr
                       key={product.id}
@@ -287,7 +341,18 @@ const Stock = () => {
                         <td className="px-6 py-4 text-center align-middle">
                           <button
                             type="button"
-                            onClick={() => handleEditClick(product)}
+                            onClick={() =>
+                              handleEditClick({
+                                ...product,
+                                lastSupplyDate: String(
+                                  product.lastSupplyDate ??
+                                    new Date().toISOString(),
+                                ),
+                                lowStockThreshold: Number(
+                                  product.lowStockThreshold ?? 0,
+                                ),
+                              })
+                            }
                             className="rounded-lg p-2 text-pink-600 transition-colors hover:bg-pink-50"
                             title="Edit Product Details"
                           >
@@ -303,7 +368,7 @@ const Stock = () => {
           </table>
         </div>
         <div className="flex items-center justify-between border-t border-gray-100 bg-gray-50 p-4 text-xs text-gray-500">
-          <span>Showing {processedProducts.length} items</span>
+          <span>Showing {processedProductsList.length} items</span>
           <span>
             Sorted by:{" "}
             {sortKey === "stock"
@@ -402,10 +467,14 @@ const Stock = () => {
                 </button>
                 <button
                   type="button"
+                  disabled={isPending}
                   onClick={handleSaveEdit}
                   className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-pink-600 py-2.5 font-bold text-white shadow-sm transition-colors hover:bg-pink-700"
                 >
                   <Save size={18} /> Save Changes
+                  <Activity mode={isPending ? "visible" : "hidden"}>
+                    <LoaderCircle className="animate-spin" size={18} />
+                  </Activity>
                 </button>
               </div>
             </div>

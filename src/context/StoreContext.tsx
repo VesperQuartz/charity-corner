@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { orpc } from "../lib/orpc";
 import {
   INITIAL_PRODUCTS,
   INITIAL_SUPPLIES,
@@ -61,6 +63,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({
   const [supplies, setSupplies] = useState<SupplyEntry[]>([]);
   const [eventLogs, setEventLogs] = useState<EventLogEntry[]>([]);
 
+  const createEventLogMutation = useMutation(orpc.createEventLog.mutationOptions());
+
   // Load initial data
   useEffect(() => {
     const loadData = () => {
@@ -96,8 +100,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({
     entityId?: string,
     performedBy: string = "System",
   ) => {
+    createEventLogMutation.mutate({
+      action,
+      entity,
+      details,
+      entityId,
+      performedBy,
+    });
+
+    // Also keep local state for now if legacy components still rely on it for immediate display,
+    // though ideally they should use the getEventLogs query.
     const newLog: EventLogEntry = {
-      id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: `log_temp_${Date.now()}`,
       timestamp: new Date().toISOString(),
       action,
       entity,
@@ -105,11 +119,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({
       details,
       performedBy,
     };
-    setEventLogs((prev) => {
-      const updated = [newLog, ...prev];
-      persist(KEYS.EVENT_LOGS, updated);
-      return updated;
-    });
+    setEventLogs((prev) => [newLog, ...prev]);
   };
 
   const addProduct = (product: Product, performedBy?: string) => {

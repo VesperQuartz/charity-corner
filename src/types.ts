@@ -1,4 +1,4 @@
-import { InsertProduct } from "@/repo/schema";
+import type { InsertProduct } from "@/repo/schema";
 
 export enum PaymentMethod {
   CASH = "CASH",
@@ -7,10 +7,7 @@ export enum PaymentMethod {
   CREDIT = "CREDIT",
 }
 
-export enum UserRole {
-  ADMIN = "ADMIN",
-  CASHIER = "CASHIER",
-}
+export type UserRole = "admin" | "cashier";
 
 export interface User {
   id: string;

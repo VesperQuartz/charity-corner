@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/database";
 import { authorized } from "@/lib/orpc/context/authorized";
 import {
+  eventLog,
   insertProductSchema,
   products,
   updateProductSchema,
@@ -24,21 +25,47 @@ export const getProducts = authorized
 
 export const createProduct = authorized
   .input(createProductInputSchema)
-  .handler(async ({ input }) => {
-    const [created] = await db.insert(products).values(input).returning();
-    if (!created) throw new Error("Failed to create product");
-    return created;
+  .handler(async ({ input, context }) => {
+    const result = await db.transaction(async (tx) => {
+      const [created] = await tx.insert(products).values(input).returning();
+      if (!created) throw new Error("Failed to create product");
+
+      await tx.insert(eventLog).values({
+        timestamp: new Date().toISOString(),
+        action: "CREATE",
+        entity: "PRODUCT",
+        entityId: created.id,
+        details: `Created product: ${input.name}`,
+        performedBy: context.user.name || context.user.id,
+      });
+
+      return created;
+    });
+    return result;
   });
 
 export const updateProduct = authorized
   .input(updateProductInputSchema)
-  .handler(async ({ input }) => {
+  .handler(async ({ input, context }) => {
     const { id, ...data } = input;
-    const [updated] = await db
-      .update(products)
-      .set(data)
-      .where(eq(products.id, id))
-      .returning();
-    if (!updated) throw new Error("Product not found");
-    return updated;
+    const result = await db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(products)
+        .set(data)
+        .where(eq(products.id, id))
+        .returning();
+      if (!updated) throw new Error("Product not found");
+
+      await tx.insert(eventLog).values({
+        timestamp: new Date().toISOString(),
+        action: "UPDATE",
+        entity: "PRODUCT",
+        entityId: id,
+        details: `Updated product: ${updated.name}`,
+        performedBy: context.user.name || context.user.id,
+      });
+
+      return updated;
+    });
+    return result;
   });

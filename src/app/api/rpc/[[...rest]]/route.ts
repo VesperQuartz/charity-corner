@@ -1,8 +1,4 @@
-import {
-  BodyLimitPlugin,
-  CompressionPlugin,
-  RPCHandler,
-} from "@orpc/server/fetch";
+import { CompressionPlugin, RPCHandler } from "@orpc/server/fetch";
 import {
   BatchHandlerPlugin,
   CORSPlugin,
@@ -19,10 +15,7 @@ const handler = new RPCHandler(router, {
       allowMethods: ["GET", "HEAD", "PUT", "POST", "DELETE", "PATCH"],
     }),
     new BatchHandlerPlugin(),
-    new CompressionPlugin(),
-    new BodyLimitPlugin({
-      maxBodySize: 1024 * 1024 * 5, // 5MB
-    }),
+    // new CompressionPlugin(),
   ],
 });
 

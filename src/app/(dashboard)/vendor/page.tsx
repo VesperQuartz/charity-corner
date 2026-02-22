@@ -25,14 +25,13 @@ import {
   X,
 } from "lucide-react";
 import type React from "react";
-import { Activity, useMemo, useRef, useState } from "react";
+import { Activity, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "react-hot-toast/headless";
 import * as XLSX from "xlsx";
 import z from "zod";
 import { FormError } from "@/components/error-form";
-import { useAuth } from "@/context/AuthContext";
 import { orpc } from "@/lib/orpc";
-import type { Product, SupplyEntry, Vendor } from "@/types";
+import type { Product, Vendor } from "@/types";
 
 const vendorFormSchema = z.object({
   name: z.string().min(1, "Vendor name is required").trim(),
@@ -56,6 +55,7 @@ const supplyFormSchema = z.object({
 
 const VendorPage = () => {
   const queryClient = useQueryClient();
+  const [isPending, startTransition] = useTransition();
   const vendorsQuery = useQuery(orpc.getVendors.queryOptions());
   const productsQuery = useQuery(orpc.getProducts.queryOptions());
   const supplyEntriesQuery = useQuery(orpc.getSupplyEntries.queryOptions());
@@ -200,93 +200,99 @@ const VendorPage = () => {
     defaultValues: initialSupplyForm,
     validators: { onSubmit: supplyFormSchema },
     onSubmit: async ({ value }) => {
-      console.log("Value", value);
-      let finalVendorId = value.vendorId;
-      if (!finalVendorId) {
-        const nameEntered = value.vendorName.trim();
-        const match = vendors.find(
-          (v) => v.name.toLowerCase() === nameEntered.toLowerCase(),
-        );
-        if (match) {
-          finalVendorId = match.id;
-        } else {
+      startTransition(async () => {
+        console.log("Value", value);
+        let finalVendorId = value.vendorId;
+        if (!finalVendorId) {
+          const nameEntered = value.vendorName.trim();
+          const match = vendors.find(
+            (v) => v.name.toLowerCase() === nameEntered.toLowerCase(),
+          );
+          if (match) {
+            finalVendorId = match.id;
+          } else {
+            try {
+              const created = await createVendorMutation.mutateAsync({
+                name: nameEntered,
+                contact: "-",
+                email: "noreply@vendor.local",
+              });
+              finalVendorId = created.id;
+            } catch (err) {
+              toast.error(
+                err instanceof Error ? err.message : "Failed to create vendor",
+              );
+              return;
+            }
+          }
+        }
+
+        let finalProductId = value.productId;
+        if (!finalProductId) {
           try {
-            const created = await createVendorMutation.mutateAsync({
-              name: nameEntered,
-              contact: "-",
-              email: "noreply@vendor.local",
+            const created = await createProductMutation.mutateAsync({
+              name: value.itemName.trim(),
+              costPrice: value.costPrice,
+              sellingPrice: value.sellingPrice,
+              stock: 0,
+              vendorId: finalVendorId,
+              lowStockThreshold: value.lowStockThreshold,
             });
-            finalVendorId = created.id;
+            finalProductId = created.id;
           } catch (err) {
             toast.error(
-              err instanceof Error ? err.message : "Failed to create vendor",
+              err instanceof Error ? err.message : "Failed to create product",
             );
             return;
           }
-        }
-      }
-
-      let finalProductId = value.productId;
-      if (!finalProductId) {
-        try {
-          const created = await createProductMutation.mutateAsync({
-            name: value.itemName.trim(),
-            costPrice: value.costPrice,
-            sellingPrice: value.sellingPrice,
-            stock: 0,
-            vendorId: finalVendorId,
-            lowStockThreshold: value.lowStockThreshold,
-          });
-          finalProductId = created.id;
-        } catch (err) {
-          alert(
-            err instanceof Error ? err.message : "Failed to create product",
-          );
-          return;
-        }
-      } else {
-        const existingProduct = products.find((p) => p.id === finalProductId);
-        if (
-          existingProduct &&
-          existingProduct.lowStockThreshold !== value.lowStockThreshold
-        ) {
-          try {
-            await updateProductMutation.mutateAsync({
-              id: finalProductId,
-              lowStockThreshold: value.lowStockThreshold,
-            });
-          } catch {
-            // non-blocking
+        } else {
+          const existingProduct = products.find((p) => p.id === finalProductId);
+          if (
+            existingProduct &&
+            existingProduct.lowStockThreshold !== value.lowStockThreshold
+          ) {
+            try {
+              await updateProductMutation.mutateAsync({
+                id: finalProductId,
+                lowStockThreshold: value.lowStockThreshold,
+              });
+            } catch {
+              // non-blocking
+            }
           }
         }
-      }
 
-      const payload = {
-        date: value.date,
-        vendorId: finalVendorId,
-        productId: finalProductId,
-        quantity: value.quantity,
-        costPrice: value.costPrice,
-        sellingPrice: value.sellingPrice,
-        purchaseOrderNumber: value.purchaseOrder,
-        isPaid: false,
-      };
+        const payload = {
+          date: value.date,
+          vendorId: finalVendorId,
+          productId: finalProductId,
+          quantity: value.quantity,
+          costPrice: value.costPrice,
+          sellingPrice: value.sellingPrice,
+          purchaseOrderNumber: value.purchaseOrder,
+          isPaid: false,
+        };
 
-      try {
-        if (editingSupplyId) {
-          await updateSupplyEntryMutation.mutateAsync({
-            id: editingSupplyId,
-            ...payload,
-          });
-        } else {
-          await createSupplyEntryMutation.mutateAsync(payload);
-        }
-        closeSupplyModal();
-      } catch (err) {
-        alert(
-          err instanceof Error ? err.message : "Failed to save supply entry",
-        );
-      }
+              try {
+                if (editingSupplyId) {
+                  await updateSupplyEntryMutation.mutateAsync({
+                    id: editingSupplyId,
+                    ...payload,
+                  });
+                  toast.success("Supply record updated successfully");
+                } else {
+                  await createSupplyEntryMutation.mutateAsync(payload);
+                  toast.success("New supply record added successfully");
+                }
+                closeSupplyModal();
+              } catch (err) {
+                console.error("Mutation Error Details:", err);
+                toast.error(
+                  err instanceof Error ? err.message : "Failed to save supply entry",
+                );
+              }
+        
+      });
     },
   });
 
@@ -308,26 +314,34 @@ const VendorPage = () => {
     defaultValues: initialVendorForm,
     validators: { onSubmit: vendorFormSchema },
     onSubmit: async ({ value }) => {
-      if (editingVendorId) {
-        updateVendorMutation.mutate(
-          { id: editingVendorId, ...value },
-          {
-            onSuccess: () => closeVendorModal(),
+      startTransition(async () => {
+        if (editingVendorId) {
+          updateVendorMutation.mutate(
+            { id: editingVendorId, ...value },
+            {
+              onSuccess: () => {
+                toast.success("Vendor updated successfully");
+                closeVendorModal();
+              },
+              onError: (e) =>
+                toast.error(
+                  e instanceof Error ? e.message : "Failed to update vendor",
+                ),
+            },
+          );
+        } else {
+          await createVendorMutation.mutateAsync(value, {
+            onSuccess: () => {
+              toast.success("New vendor added successfully");
+              closeVendorModal();
+            },
             onError: (e) =>
               toast.error(
-                e instanceof Error ? e.message : "Failed to update vendor",
+                e instanceof Error ? e.message : "Failed to create vendor",
               ),
-          },
-        );
-      } else {
-        await createVendorMutation.mutateAsync(value, {
-          onSuccess: () => closeVendorModal(),
-          onError: (e) =>
-            toast.error(
-              e instanceof Error ? e.message : "Failed to create vendor",
-            ),
-        });
-      }
+          });
+        }
+      });
     },
   });
 
@@ -374,20 +388,6 @@ const VendorPage = () => {
     return data;
   }, [supplies, products, vendors, searchTerm, dateFilter, sortConfig]);
 
-  const supplyFormValues = supplyForm.state.values;
-  const matchingProducts = useMemo(() => {
-    if (!supplyFormValues.itemName || supplyFormValues.productId) return [];
-    return products.filter((p) =>
-      p.name.toLowerCase().includes(supplyFormValues.itemName.toLowerCase()),
-    );
-  }, [products, supplyFormValues.itemName, supplyFormValues.productId]);
-
-  const matchingVendors = vendors.filter((v) =>
-    v.name.toLowerCase().includes(supplyFormValues.vendorName.toLowerCase()),
-  );
-
-  console.log("matchingVendors", matchingVendors);
-
   const supplyToDeleteDetails = useMemo(() => {
     if (!supplyToDelete) return null;
     const supply = supplies.find((s) => s.id === supplyToDelete);
@@ -412,54 +412,37 @@ const VendorPage = () => {
   const handleCostChange = (cost: number) => {
     const current = supplyForm.state.values;
     const profit = current.sellingPrice - cost;
-    supplyForm.reset({
-      ...current,
-      costPrice: cost,
-      profit: parseFloat(profit.toFixed(2)),
-    });
+    supplyForm.setFieldValue("costPrice", cost);
+    supplyForm.setFieldValue("profit", parseFloat(profit.toFixed(2)));
   };
 
   const handleProfitChange = (profit: number) => {
     const current = supplyForm.state.values;
     const selling = current.costPrice + profit;
-    supplyForm.reset({
-      ...current,
-      profit,
-      sellingPrice: parseFloat(selling.toFixed(2)),
-    });
+    supplyForm.setFieldValue("profit", profit);
+    supplyForm.setFieldValue("sellingPrice", parseFloat(selling.toFixed(2)));
   };
 
   const handleSellingChange = (selling: number) => {
     const current = supplyForm.state.values;
     const profit = selling - current.costPrice;
-    supplyForm.reset({
-      ...current,
-      sellingPrice: selling,
-      profit: parseFloat(profit.toFixed(2)),
-    });
+    supplyForm.setFieldValue("sellingPrice", selling);
+    supplyForm.setFieldValue("profit", parseFloat(profit.toFixed(2)));
   };
 
   const selectExistingProduct = (p: Product) => {
-    const current = supplyForm.state.values;
     const profit = p.sellingPrice - p.costPrice;
-    supplyForm.reset({
-      ...current,
-      productId: p.id,
-      itemName: p.name,
-      costPrice: p.costPrice,
-      sellingPrice: p.sellingPrice,
-      profit: parseFloat(profit.toFixed(2)),
-      lowStockThreshold: p.lowStockThreshold ?? 10,
-    });
+    supplyForm.setFieldValue("productId", p.id);
+    supplyForm.setFieldValue("itemName", p.name);
+    supplyForm.setFieldValue("costPrice", p.costPrice);
+    supplyForm.setFieldValue("sellingPrice", p.sellingPrice);
+    supplyForm.setFieldValue("profit", parseFloat(profit.toFixed(2)));
+    supplyForm.setFieldValue("lowStockThreshold", p.lowStockThreshold ?? 10);
   };
 
   const selectExistingVendor = (v: Vendor) => {
-    const current = supplyForm.state.values;
-    supplyForm.reset({
-      ...current,
-      vendorId: v.id,
-      vendorName: v.name,
-    });
+    supplyForm.setFieldValue("vendorId", v.id);
+    supplyForm.setFieldValue("vendorName", v.name);
   };
 
   const openNewSupply = () => {
@@ -516,9 +499,12 @@ const VendorPage = () => {
       deleteSupplyEntryMutation.mutate(
         { id: supplyToDelete },
         {
-          onSuccess: () => setSupplyToDelete(null),
+          onSuccess: () => {
+            toast.success("Supply record deleted successfully");
+            setSupplyToDelete(null);
+          },
           onError: (e) =>
-            alert(e instanceof Error ? e.message : "Failed to delete"),
+            toast.error(e instanceof Error ? e.message : "Failed to delete"),
         },
       );
     }
@@ -671,7 +657,7 @@ const VendorPage = () => {
       }
 
       closeBulkSupply();
-      alert(`Successfully processed ${validRows.length} records.`);
+      toast.success(`Successfully processed ${validRows.length} records.`);
     } catch (e) {
       setBulkError("Error processing records. Please try again.");
       console.error(e);
@@ -779,7 +765,7 @@ const VendorPage = () => {
       }
 
       closeBulkVendor();
-      alert(`Process complete. Added ${addedCount} new vendors.`);
+      toast.success(`Process complete. Added ${addedCount} new vendors.`);
     } catch (e) {
       setBulkVendorError("Error processing records. Please try again.");
       console.error(e);
@@ -805,11 +791,12 @@ const VendorPage = () => {
         { id: vendorToDelete },
         {
           onSuccess: () => {
+            toast.success("Vendor deleted successfully");
             if (selectedVendorId === vendorToDelete) setSelectedVendorId(null);
             setVendorToDelete(null);
           },
           onError: (e) =>
-            alert(e instanceof Error ? e.message : "Failed to delete"),
+            toast.error(e instanceof Error ? e.message : "Failed to delete"),
         },
       );
     }
@@ -1391,20 +1378,7 @@ const VendorPage = () => {
               </div>
 
               <div>
-                <supplyForm.Field
-                  name="vendorName"
-                  listeners={{
-                    onChange: (value) => {
-                      console.log("onChange", value);
-                      const val = value.value;
-                      supplyForm.reset({
-                        ...supplyForm.state.values,
-                        vendorName: val,
-                        vendorId: "",
-                      });
-                    },
-                  }}
-                >
+                <supplyForm.Field name="vendorName">
                   {(field) => (
                     <>
                       <label className="mb-1 block text-sm font-medium text-gray-700">
@@ -1415,39 +1389,69 @@ const VendorPage = () => {
                           type="text"
                           autoComplete="off"
                           value={field.state.value}
-                          onChange={(e) => field.handleChange(e.target.value)}
+                          onChange={(e) => {
+                            field.handleChange(e.target.value);
+                            supplyForm.setFieldValue("vendorId", "");
+                          }}
                           className="w-full rounded-md border p-2"
                           placeholder="Enter vendor name..."
                         />
-                        {matchingVendors.length > 0 && (
-                          <div className="absolute top-full right-0 left-0 z-50 mt-1 max-h-40 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
-                            {matchingVendors?.map((v) => (
-                              <button
-                                key={v.id}
-                                type="button"
-                                onClick={() => selectExistingVendor(v)}
-                                className="group flex w-full items-center justify-between px-4 py-2 text-left hover:bg-gray-100"
-                              >
-                                <span className="font-medium text-gray-800">
-                                  {v.name}
-                                </span>
-                                <span className="text-xs text-gray-400 group-hover:text-pink-500">
-                                  Use Existing
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        )}
+                        <supplyForm.Subscribe
+                          selector={(state) => [
+                            state.values.vendorName,
+                            state.values.vendorId,
+                          ]}
+                        >
+                          {([vendorName, vendorId]) => {
+                            const matches =
+                              !vendorName || vendorId
+                                ? []
+                                : vendors.filter((v) =>
+                                    v.name
+                                      .toLowerCase()
+                                      .includes(vendorName.toLowerCase()),
+                                  );
+
+                            if (matches.length === 0) return null;
+
+                            return (
+                              <div className="absolute top-full right-0 left-0 z-50 mt-1 max-h-40 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
+                                {matches.map((v) => (
+                                  <button
+                                    key={v.id}
+                                    type="button"
+                                    onClick={() => selectExistingVendor(v)}
+                                    className="group flex w-full items-center justify-between px-4 py-2 text-left hover:bg-gray-100"
+                                  >
+                                    <span className="font-medium text-gray-800">
+                                      {v.name}
+                                    </span>
+                                    <span className="text-xs text-gray-400 group-hover:text-pink-500">
+                                      Use Existing
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            );
+                          }}
+                        </supplyForm.Subscribe>
                       </div>
                       <FormError field={field} />
                     </>
                   )}
                 </supplyForm.Field>
-                {supplyFormValues.vendorId && (
-                  <p className="mt-1 flex items-center gap-1 text-xs text-green-600">
-                    <CheckCircle size={12} /> Linked to existing vendor database
-                  </p>
-                )}
+                <supplyForm.Subscribe
+                  selector={(state) => state.values.vendorId}
+                >
+                  {(vendorId) =>
+                    vendorId ? (
+                      <p className="mt-1 flex items-center gap-1 text-xs text-green-600">
+                        <CheckCircle size={12} /> Linked to existing vendor
+                        database
+                      </p>
+                    ) : null
+                  }
+                </supplyForm.Subscribe>
               </div>
 
               <div className="space-y-4 border-t border-gray-100 pt-4">
@@ -1463,46 +1467,68 @@ const VendorPage = () => {
                         placeholder="Search existing or enter new product name..."
                         value={field.state.value}
                         onChange={(e) => {
-                          const val = e.target.value;
-                          supplyForm.reset({
-                            ...supplyForm.state.values,
-                            itemName: val,
-                            productId: "",
-                          });
+                          field.handleChange(e.target.value);
+                          supplyForm.setFieldValue("productId", "");
                         }}
                         className="w-full rounded-md border p-2"
                       />
-                      {!editingSupplyId && matchingProducts.length > 0 && (
-                        <div className="absolute top-full right-0 left-0 z-50 mt-1 max-h-40 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
-                          {matchingProducts.map((p) => (
-                            <button
-                              key={p.id}
-                              type="button"
-                              onClick={() =>
-                                selectExistingProduct(p as Product)
-                              }
-                              className="group flex w-full items-center justify-between px-4 py-2 text-left hover:bg-gray-100"
-                            >
-                              <span className="font-medium text-gray-800">
-                                {p.name}
-                              </span>
-                              <span className="text-xs text-gray-400 group-hover:text-pink-500">
-                                Use Existing
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                      <supplyForm.Subscribe
+                        selector={(state) => [
+                          state.values.itemName,
+                          state.values.productId,
+                        ]}
+                      >
+                        {([itemName, productId]) => {
+                          const matches =
+                            editingSupplyId || !itemName || productId
+                              ? []
+                              : products.filter((p) =>
+                                  p.name
+                                    .toLowerCase()
+                                    .includes(itemName.toLowerCase()),
+                                );
+
+                          if (matches.length === 0) return null;
+
+                          return (
+                            <div className="absolute top-full right-0 left-0 z-50 mt-1 max-h-40 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
+                              {matches.map((p) => (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  onClick={() =>
+                                    selectExistingProduct(p as Product)
+                                  }
+                                  className="group flex w-full items-center justify-between px-4 py-2 text-left hover:bg-gray-100"
+                                >
+                                  <span className="font-medium text-gray-800">
+                                    {p.name}
+                                  </span>
+                                  <span className="text-xs text-gray-400 group-hover:text-pink-500">
+                                    Use Existing
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          );
+                        }}
+                      </supplyForm.Subscribe>
                       <FormError field={field} />
                     </div>
                   )}
                 </supplyForm.Field>
-                {supplyFormValues.productId && (
-                  <p className="mt-1 flex items-center gap-1 text-xs text-green-600">
-                    <CheckCircle size={12} /> Linked to existing product
-                    database
-                  </p>
-                )}
+                <supplyForm.Subscribe
+                  selector={(state) => state.values.productId}
+                >
+                  {(productId) =>
+                    productId ? (
+                      <p className="mt-1 flex items-center gap-1 text-xs text-green-600">
+                        <CheckCircle size={12} /> Linked to existing product
+                        database
+                      </p>
+                    ) : null
+                  }
+                </supplyForm.Subscribe>
 
                 <div className="grid grid-cols-1 gap-4">
                   <div className="grid grid-cols-2 gap-4">
@@ -1617,12 +1643,24 @@ const VendorPage = () => {
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  className="flex-1 rounded-lg bg-pink-600 py-3 font-bold text-white shadow-md hover:bg-pink-700"
+                <supplyForm.Subscribe
+                  selector={(state) => [state.canSubmit, state.isSubmitting]}
                 >
-                  {editingSupplyId ? "Update Record" : "Confirm Supply Entry"}
-                </button>
+                  {([canSubmit, isSubmitting]) => (
+                    <button
+                      disabled={!canSubmit || isSubmitting || isPending}
+                      type="submit"
+                      className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-pink-600 py-3 font-bold text-white shadow-md hover:bg-pink-700"
+                    >
+                      {editingSupplyId
+                        ? "Update Record"
+                        : "Confirm Supply Entry"}
+                      <Activity mode={isPending ? "visible" : "hidden"}>
+                        <LoaderCircle className="animate-spin" size={18} />
+                      </Activity>
+                    </button>
+                  )}
+                </supplyForm.Subscribe>
               </div>
             </form>
           </div>
@@ -2044,19 +2082,13 @@ const VendorPage = () => {
                   {([canSubmit, isSubmitting]) => {
                     return (
                       <button
-                        disabled={!canSubmit || isSubmitting}
+                        disabled={!canSubmit || isSubmitting || isPending}
                         type="submit"
-                        className="flex flex-1 items-center justify-center rounded-lg bg-pink-600 py-2 font-medium text-white shadow-sm hover:bg-pink-700"
+                        className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-pink-600 py-2 font-medium text-white shadow-sm hover:bg-pink-700"
                       >
                         {editingVendorId ? "Update Vendor" : "Save Vendor"}
-                        <Activity
-                          mode={
-                            createVendorMutation.isPending
-                              ? "visible"
-                              : "hidden"
-                          }
-                        >
-                          <LoaderCircle className="animate-spin" />
+                        <Activity mode={isPending ? "visible" : "hidden"}>
+                          <LoaderCircle className="animate-spin" size={18} />
                         </Activity>
                       </button>
                     );

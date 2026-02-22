@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/database";
 import { authorized } from "@/lib/orpc/context/authorized";
 import {
+  eventLog,
   insertSupplyEntrySchema,
   products,
   supplyEntries,
@@ -39,34 +40,81 @@ export const getSupplyEntries = authorized
 
 export const createSupplyEntry = authorized
   .input(createSupplyEntryInputSchema)
-  .handler(async ({ input }) => {
-    return db.transaction(async (tx) => {
-      const [entry] = await tx.insert(supplyEntries).values(input).returning();
-      if (!entry) throw new Error("Failed to create supply entry");
+  .handler(async ({ input, context }) => {
+    try {
+      const {
+        date,
+        vendorId,
+        productId,
+        quantity,
+        costPrice,
+        sellingPrice,
+        purchaseOrderNumber,
+        isPaid,
+      } = input;
 
-      const [product] = await tx
-        .select({ stock: products.stock })
-        .from(products)
-        .where(eq(products.id, entry.productId));
-      const newStock = (product?.stock ?? 0) + entry.quantity;
-      await tx
-        .update(products)
-        .set({
-          stock: newStock,
-          costPrice: entry.costPrice,
-          sellingPrice: entry.sellingPrice,
-          lastSupplyDate: entry.date,
-          vendorId: entry.vendorId,
-        })
-        .where(eq(products.id, entry.productId));
+      // 1. Insert supply entry
+      const result = await db.transaction(async (tx) => {
+        const [entry] = await tx
+          .insert(supplyEntries)
+          .values({
+            date,
+            vendorId,
+            productId,
+            quantity,
+            costPrice,
+            sellingPrice,
+            purchaseOrderNumber,
+            isPaid: isPaid ?? false,
+          })
+          .returning();
 
-      return entry;
-    });
+        if (!entry) {
+          throw new Error("Database failed to return the inserted supply entry");
+        }
+
+        // 2. Update product stock and prices
+        const [product] = await tx
+          .select({ stock: products.stock, name: products.name })
+          .from(products)
+          .where(eq(products.id, productId));
+
+        const newStock = (product?.stock ?? 0) + quantity;
+
+        await tx
+          .update(products)
+          .set({
+            stock: Math.round(newStock), // Ensure it's an integer for the integer column
+            costPrice: costPrice,
+            sellingPrice: sellingPrice,
+            lastSupplyDate: date,
+            vendorId: vendorId,
+          })
+          .where(eq(products.id, productId));
+
+        // 3. Log event
+        await tx.insert(eventLog).values({
+          timestamp: new Date().toISOString(),
+          action: "CREATE",
+          entity: "SUPPLY",
+          entityId: entry.id,
+          details: `Added supply entry for product: ${product?.name || productId}, Qty: ${quantity}`,
+          performedBy: context.user.name || context.user.id,
+        });
+
+        return entry;
+      });
+
+      return result;
+    } catch (err) {
+      console.error("CRITICAL ERROR in createSupplyEntry:", err);
+      throw err;
+    }
   });
 
 export const updateSupplyEntry = authorized
   .input(updateSupplyEntryInputSchema)
-  .handler(async ({ input }) => {
+  .handler(async ({ input, context }) => {
     const { id, ...data } = input;
     return db.transaction(async (tx) => {
       const [existing] = await tx
@@ -107,13 +155,22 @@ export const updateSupplyEntry = authorized
           .where(eq(products.id, existing.productId));
       }
 
+      await tx.insert(eventLog).values({
+        timestamp: new Date().toISOString(),
+        action: "UPDATE",
+        entity: "SUPPLY",
+        entityId: id,
+        details: `Updated supply entry ${id}`,
+        performedBy: context.user.name || context.user.id,
+      });
+
       return updated;
     });
   });
 
 export const deleteSupplyEntry = authorized
   .input(deleteSupplyEntryInputSchema)
-  .handler(async ({ input }) => {
+  .handler(async ({ input, context }) => {
     return db.transaction(async (tx) => {
       const [entry] = await tx
         .select()
@@ -132,6 +189,16 @@ export const deleteSupplyEntry = authorized
         .where(eq(products.id, entry.productId));
 
       await tx.delete(supplyEntries).where(eq(supplyEntries.id, input.id));
+
+      await tx.insert(eventLog).values({
+        timestamp: new Date().toISOString(),
+        action: "DELETE",
+        entity: "SUPPLY",
+        entityId: input.id,
+        details: `Deleted supply entry ${input.id}`,
+        performedBy: context.user.name || context.user.id,
+      });
+
       return { success: true };
     });
   });

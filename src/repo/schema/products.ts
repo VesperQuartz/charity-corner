@@ -42,8 +42,8 @@ export type SelectProduct = z.infer<typeof selectProductSchema>;
 export const insertProductSchema = createInsertSchema(products, {
   id: (s) => s.optional(),
   name: (s) => s.min(1, "Product name is required"),
-  costPrice: (s) => s.positive("Cost price must be greater than 0"),
-  sellingPrice: (s) => s.positive("Selling price must be greater than 0"),
+  costPrice: (s) => s.nonnegative("Cost price must be 0 or more"),
+  sellingPrice: (s) => s.nonnegative("Selling price must be 0 or more"),
   stock: (s) => s.int().nonnegative("Stock cannot be negative").optional(),
   lowStockThreshold: (s) =>
     s.int().nonnegative("Threshold cannot be negative").optional(),
@@ -53,9 +53,9 @@ export type InsertProduct = z.infer<typeof insertProductSchema>;
 
 export const updateProductSchema = createUpdateSchema(products, {
   name: (s) => s.min(1, "Product name is required").optional(),
-  costPrice: (s) => s.positive("Cost price must be greater than 0").optional(),
+  costPrice: (s) => s.nonnegative("Cost price must be 0 or more").optional(),
   sellingPrice: (s) =>
-    s.positive("Selling price must be greater than 0").optional(),
+    s.nonnegative("Selling price must be 0 or more").optional(),
   stock: (s) => s.int().nonnegative("Stock cannot be negative").optional(),
   lowStockThreshold: (s) =>
     s.int().nonnegative("Threshold cannot be negative").optional(),

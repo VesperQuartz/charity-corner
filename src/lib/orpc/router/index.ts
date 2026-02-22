@@ -1,11 +1,16 @@
 import { createProduct, getProducts, updateProduct } from "@/lib/orpc/router/products";
+import { createEventLog, getEventLogs } from "@/lib/orpc/router/event-log";
 import {
   createSupplyEntry,
   deleteSupplyEntry,
   getSupplyEntries,
   updateSupplyEntry,
 } from "@/lib/orpc/router/supply-entries";
-import { createTransaction } from "@/lib/orpc/router/transactions";
+import {
+  createTransaction,
+  getTransactions,
+  updateTransaction,
+} from "@/lib/orpc/router/transactions";
 import { createTodo, getTodo } from "@/lib/orpc/router/todo";
 import {
   createVendor,
@@ -18,9 +23,13 @@ export default {
   createTodo,
   getTodo,
   getProducts,
+  getEventLogs,
+  createEventLog,
   createProduct,
   updateProduct,
   createTransaction,
+  getTransactions,
+  updateTransaction,
   getVendors,
   createVendor,
   updateVendor,

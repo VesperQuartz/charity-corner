@@ -6,7 +6,7 @@ import {
   createSelectSchema,
   createUpdateSchema,
 } from "drizzle-zod";
-import type z from "zod";
+import z from "zod";
 import { products } from "./products";
 import { vendors } from "./vendors";
 
@@ -47,11 +47,10 @@ export type SelectSupplyEntry = z.infer<typeof selectSupplyEntrySchema>;
 
 export const insertSupplyEntrySchema = createInsertSchema(supplyEntries, {
   id: (s) => s.optional(),
-  date: (s) =>
-    s.datetime({ message: "Date must be a valid ISO string" }).optional(),
+  date: () => z.string().min(1, "Date is required").optional(),
   quantity: (s) => s.positive("Quantity must be greater than 0"),
-  costPrice: (s) => s.positive("Cost price must be greater than 0"),
-  sellingPrice: (s) => s.positive("Selling price must be greater than 0"),
+  costPrice: (s) => s.nonnegative("Cost price must be 0 or more"),
+  sellingPrice: (s) => s.nonnegative("Selling price must be 0 or more"),
   purchaseOrderNumber: (s) => s.min(1, "Purchase order number is required"),
   isPaid: (s) => s.optional(),
 });

@@ -1,6 +1,6 @@
 "use client";
 import {
-  Activity,
+  Activity as ActivityIcon,
   BarChart3,
   History,
   LogOut,
@@ -14,7 +14,6 @@ import NavLink from "@/components/navlink";
 import { AuthProvider } from "@/context/AuthContext";
 import { StoreProvider } from "@/context/StoreContext";
 import { authClient } from "@/lib/auth-client";
-import { UserRole } from "@/types";
 
 const SidebarLink: React.FC<{
   to: string;
@@ -41,7 +40,7 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
   const auth = authClient.useSession();
   if (auth.isPending) return <div>Loading...</div>;
 
-  const isAdmin = auth.data?.user.role === UserRole.ADMIN;
+  const isAdmin = auth.data?.user.role === "admin";
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100">
@@ -88,13 +87,13 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
                 label="Analytics"
               />
               <SidebarLink
-                to="/users"
+                to="/user-management"
                 icon={<Users size={20} />}
                 label="User Access"
               />
               <SidebarLink
-                to="/events"
-                icon={<Activity size={20} />}
+                to="/event-log"
+                icon={<ActivityIcon size={20} />}
                 label="Event Log"
               />
             </>
@@ -117,7 +116,7 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
               </p>
               <p className="flex items-center justify-end gap-1 text-xs text-green-600">
                 <span className="h-2 w-2 rounded-full bg-green-500"></span>
-                {auth.data?.user?.role}
+                {auth.data?.user?.role?.toUpperCase()}
               </p>
             </div>
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-200 font-bold text-gray-500 uppercase">

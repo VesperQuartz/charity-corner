@@ -7,7 +7,9 @@ import {
   products,
   transactionItems,
   transactions,
+  updateTransactionSchema,
 } from "@/repo/schema";
+import { z } from "zod";
 
 // Client sends: subtotal, total, paymentMethod, debtorName?, items. Server sets id, date, cashierId.
 const createTransactionInputSchema = insertTransactionSchema.omit({
@@ -15,6 +17,33 @@ const createTransactionInputSchema = insertTransactionSchema.omit({
   date: true,
   cashierId: true,
 });
+
+const updateTransactionInputSchema = updateTransactionSchema.extend({
+  id: z.string().min(1, "Transaction ID is required"),
+});
+
+export const getTransactions = authorized
+  .route({ method: "GET", path: "/transactions" })
+  .handler(async () => {
+    return db.query.transactions.findMany({
+      with: {
+        items: true,
+      },
+    });
+  });
+
+export const updateTransaction = authorized
+  .input(updateTransactionInputSchema)
+  .handler(async ({ input }) => {
+    const { id, ...data } = input;
+    const [updated] = await db
+      .update(transactions)
+      .set(data)
+      .where(eq(transactions.id, id))
+      .returning();
+    if (!updated) throw new Error("Transaction not found");
+    return updated;
+  });
 
 export const createTransaction = authorized
   .input(createTransactionInputSchema)

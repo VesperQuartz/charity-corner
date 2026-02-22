@@ -1,33 +1,59 @@
 "use client";
 
-import { isSameDay } from "date-fns";
-import { Calendar, CheckCircle, List, PieChart, X } from "lucide-react";
-import React, { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Calendar, CheckCircle, LoaderCircle, X } from "lucide-react";
+import React, { Activity, useMemo, useState, useTransition } from "react";
+import { toast } from "react-hot-toast/headless";
 import { useAuth } from "@/context/AuthContext";
-import { useStore } from "@/context/StoreContext";
-import { PaymentMethod, Transaction } from "@/types";
+import { orpc } from "@/lib/orpc";
+import { PaymentMethod, type Transaction } from "@/types";
 
 const History = () => {
-  const { transactions, updateTransaction } = useStore();
-  const { users, currentUser } = useAuth();
+  const queryClient = useQueryClient();
+  const [isPending, startTransition] = React.useTransition();
+  const transactionsQuery = useQuery(orpc.getTransactions.queryOptions());
+  const { users } = useAuth();
+
+  const updateTransactionMutation = useMutation(
+    orpc.updateTransaction.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({
+          queryKey: orpc.getTransactions.queryKey(),
+        });
+        toast.success("Transaction updated successfully");
+        setShowPayModal(false);
+        setSelectedTxn(null);
+      },
+      onError: (err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Failed to update transaction",
+        );
+      },
+    }),
+  );
+
+  const transactions = transactionsQuery.data ?? [];
 
   // Default to today's date for both start and end
-  const [dateRange, setDateRange] = useState<{ start: string; end: string }>(
-    () => {
-      const now = new Date();
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, "0");
-      const day = String(now.getDate()).padStart(2, "0");
-      const today = `${year}-${month}-${day}`;
-      return { start: today, end: today };
-    },
-  );
+  const [dateRange, setDateRange] = React.useState<{
+    start: string;
+    end: string;
+  }>(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    const today = `${year}-${month}-${day}`;
+    return { start: today, end: today };
+  });
 
-  const [activeTab, setActiveTab] = useState<"log" | "debtors" | "summary">(
-    "log",
+  const [activeTab, setActiveTab] = React.useState<
+    "log" | "debtors" | "summary"
+  >("log");
+  const [showPayModal, setShowPayModal] = React.useState(false);
+  const [selectedTxn, setSelectedTxn] = React.useState<Transaction | null>(
+    null,
   );
-  const [showPayModal, setShowPayModal] = useState(false);
-  const [selectedTxn, setSelectedTxn] = useState<Transaction | null>(null);
 
   // Helper to resolve cashier name
   const getCashierName = (id: string) => {
@@ -37,7 +63,7 @@ const History = () => {
   };
 
   // Filter Logic
-  const filteredTransactions = useMemo(() => {
+  const filteredTransactions = React.useMemo(() => {
     // If no date selected (shouldn't happen with new logic, but safe guard), show all history
     if (!dateRange.start || !dateRange.end) {
       return transactions;
@@ -62,7 +88,7 @@ const History = () => {
   // because a debtor might have bought yesterday.
   // However, the user said "separate the debtors from the transaction log".
 
-  const displayedTransactions = useMemo(() => {
+  const displayedTransactions = React.useMemo(() => {
     if (activeTab === "debtors") {
       // Show all outstanding credit transactions
       return transactions.filter(
@@ -86,7 +112,7 @@ const History = () => {
   // Summary Logic (keep based on date-filtered transactions, or should it include credit?)
   // Usually summary is "Sales for today". Credit sales are still sales.
   // So summary should probably include everything for that day.
-  const summaryData = useMemo(() => {
+  const summaryData = React.useMemo(() => {
     const map = new Map<
       string,
       { name: string; quantity: number; total: number }
@@ -116,16 +142,16 @@ const History = () => {
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
   }, [filteredTransactions]);
 
-  const grandTotal = useMemo(() => {
+  const grandTotal = React.useMemo(() => {
     return summaryData.reduce((acc, curr) => acc + curr.total, 0);
   }, [summaryData]);
 
-  const totalItemsSold = useMemo(() => {
+  const totalItemsSold = React.useMemo(() => {
     return summaryData.reduce((acc, curr) => acc + curr.quantity, 0);
   }, [summaryData]);
 
   // Calculate Total Sales (Realized) and Total Debt (Unrealized) based on filteredTransactions
-  const { totalSales, totalDebt } = useMemo(() => {
+  const { totalSales, totalDebt } = React.useMemo(() => {
     let sales = 0;
     let debt = 0;
 
@@ -147,15 +173,12 @@ const History = () => {
 
   const confirmPayment = () => {
     if (selectedTxn) {
-      updateTransaction(
-        {
-          ...selectedTxn,
+      startTransition(async () => {
+        await updateTransactionMutation.mutateAsync({
+          id: selectedTxn.id,
           paymentMethod: PaymentMethod.CASH,
-        },
-        currentUser?.name,
-      );
-      setShowPayModal(false);
-      setSelectedTxn(null);
+        });
+      });
     }
   };
 
@@ -296,7 +319,19 @@ const History = () => {
                 </tr>
               </thead>
               <tbody>
-                {displayedTransactions.length === 0 ? (
+                {transactionsQuery.isLoading ? (
+                  <tr>
+                    <td colSpan={10} className="p-8 text-center">
+                      <div className="flex flex-col items-center justify-center">
+                        <LoaderCircle
+                          className="mb-4 animate-spin opacity-20"
+                          size={48}
+                        />
+                        <p className="text-lg">Loading history...</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : displayedTransactions.length === 0 ? (
                   <tr>
                     <td colSpan={10} className="p-8 text-center">
                       {activeTab === "debtors"
@@ -350,7 +385,7 @@ const History = () => {
                       </td>
                       <td className="px-6 py-4 text-center align-top">
                         <div className="flex flex-col gap-1">
-                          {txn.items.map((i, idx) => (
+                          {txn.items.map((i) => (
                             <span
                               key={crypto.randomUUID()}
                               className="font-mono text-sm text-gray-600"
@@ -502,10 +537,14 @@ const History = () => {
                 </button>
                 <button
                   type="button"
+                  disabled={isPending}
                   onClick={confirmPayment}
-                  className="flex-1 rounded-lg bg-green-600 py-2.5 font-bold text-white shadow-sm transition-colors hover:bg-green-700"
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-2.5 font-bold text-white shadow-sm transition-colors hover:bg-green-700"
                 >
                   Confirm Paid
+                  <Activity mode={isPending ? "visible" : "hidden"}>
+                    <LoaderCircle className="animate-spin" size={18} />
+                  </Activity>
                 </button>
               </div>
             </div>

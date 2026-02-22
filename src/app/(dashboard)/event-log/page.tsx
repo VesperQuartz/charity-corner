@@ -1,11 +1,14 @@
 "use client";
-import { Activity, Clock, Search, Tag } from "lucide-react";
-import { useMemo, useState } from "react";
-import { useStore } from "@/context/StoreContext";
+import { useQuery } from "@tanstack/react-query";
+import { format, parseISO } from "date-fns";
+import { Activity as ActivityIcon, Clock, LoaderCircle, Search, Tag } from "lucide-react";
+import React, { Activity, useMemo, useState } from "react";
+import { orpc } from "@/lib/orpc";
 import type { EventLogEntry } from "@/types";
 
 const EventLog = () => {
-  const { eventLogs } = useStore();
+  const eventLogsQuery = useQuery(orpc.getEventLogs.queryOptions());
+  const eventLogs = eventLogsQuery.data ?? [];
 
   const [searchTerm, setSearchTerm] = useState("");
   const [actionFilter, setActionFilter] = useState<string>("ALL");
@@ -54,12 +57,13 @@ const EventLog = () => {
   };
 
   return (
-    <div className="flex h-full animate-in flex-col gap-4 duration-300 fade-in">
-      {/* Header */}
+    <Activity mode="visible">
+      <div className="flex h-full animate-in flex-col gap-4 duration-300 fade-in">
+        {/* Header */}
       <div className="flex shrink-0 flex-col items-start justify-between rounded-lg bg-white p-6 shadow-sm md:flex-row md:items-center">
         <div>
           <h2 className="flex items-center gap-2 text-xl font-bold text-gray-800">
-            <Activity className="text-pink-600" /> System Event Log
+            <ActivityIcon className="text-pink-600" /> System Event Log
           </h2>
           <p className="text-sm text-gray-500">
             Audit trail of all system activities and changes
@@ -131,7 +135,7 @@ const EventLog = () => {
       <div className="flex flex-1 flex-col overflow-hidden rounded-lg bg-white shadow-sm">
         <div className="flex-1 overflow-auto">
           <table className="w-full text-left text-sm text-gray-500">
-            <thead className="sticky top-0 z-10 bg-gray-50 text-xs text-gray-700 uppercase shadow-sm">
+            <thead className="sticky top-0 bg-gray-50 text-xs text-gray-700 uppercase shadow-sm">
               <tr>
                 <th className="px-6 py-3">Timestamp</th>
                 <th className="px-6 py-3">Action</th>
@@ -141,14 +145,26 @@ const EventLog = () => {
               </tr>
             </thead>
             <tbody>
-              {filteredLogs.length === 0 ? (
+              {eventLogsQuery.isLoading ? (
+                <tr>
+                  <td colSpan={5} className="p-8 text-center">
+                    <div className="flex flex-col items-center justify-center">
+                      <LoaderCircle
+                        className="mb-4 animate-spin opacity-20"
+                        size={48}
+                      />
+                      <p className="text-lg">Loading events...</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : filteredLogs.length === 0 ? (
                 <tr>
                   <td
                     colSpan={5}
                     className="px-6 py-12 text-center text-gray-400"
                   >
                     <div className="flex flex-col items-center justify-center">
-                      <Activity size={48} className="mb-4 opacity-20" />
+                      <ActivityIcon size={48} className="mb-4 opacity-20" />
                       <p>No event logs found matching your filters.</p>
                     </div>
                   </td>
@@ -162,7 +178,7 @@ const EventLog = () => {
                     <td className="px-6 py-4 font-mono text-xs whitespace-nowrap">
                       <div className="flex items-center gap-2">
                         <Clock size={14} className="text-gray-400" />
-                        {new Date(log.timestamp).toLocaleString()}
+                        {format(parseISO(log.timestamp), "yyyy-MM-dd HH:mm:ss")}
                       </div>
                     </td>
                     <td className="px-6 py-4">
@@ -203,8 +219,8 @@ const EventLog = () => {
           </table>
         </div>
       </div>
-    </div>
-  );
-};
-
-export default EventLog;
+          </div>
+        </Activity>
+      );
+    };
+    export default EventLog;
