@@ -63,7 +63,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({
   const [supplies, setSupplies] = useState<SupplyEntry[]>([]);
   const [eventLogs, setEventLogs] = useState<EventLogEntry[]>([]);
 
-  const createEventLogMutation = useMutation(orpc.createEventLog.mutationOptions());
+  const createEventLogMutation = useMutation(
+    orpc.createEventLog.mutationOptions(),
+  );
 
   // Load initial data
   useEffect(() => {

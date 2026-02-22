@@ -1,8 +1,10 @@
 "use client";
+import { useQuery } from "@tanstack/react-query";
 import {
   Calendar,
   CreditCard,
   DollarSign,
+  LoaderCircle,
   Package,
   TrendingUp,
 } from "lucide-react";
@@ -17,10 +19,17 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { useStore } from "@/context/StoreContext";
+import { orpc } from "@/lib/orpc";
+import { PaymentMethod } from "@/types";
 
 const Analytics = () => {
-  const { transactions, products, supplies } = useStore();
+  const productsQuery = useQuery(orpc.getProducts.queryOptions());
+  const transactionsQuery = useQuery(orpc.getTransactions.queryOptions());
+  const supplyEntriesQuery = useQuery(orpc.getSupplyEntries.queryOptions());
+
+  const products = productsQuery.data ?? [];
+  const transactions = transactionsQuery.data ?? [];
+  const supplies = supplyEntriesQuery.data ?? [];
 
   // State for Month Filter (YYYY-MM)
   const [monthFilter, setMonthFilter] = useState(() => {
@@ -31,16 +40,12 @@ const Analytics = () => {
   // Calculate Date Range
   const dateRange = useMemo(() => {
     const [year, month] = monthFilter.split("-").map(Number);
-    // Start: 1st of month 00:00:00
     const start = new Date(year, month - 1, 1);
-    // End: Last day of month 23:59:59.999
     const end = new Date(year, month, 0, 23, 59, 59, 999);
     return { start, end };
   }, [monthFilter]);
 
-  // --- 1. Key Metrics Calculations (Filtered) ---
-
-  // Filtered Transactions
+  // Filtered Data
   const filteredTransactions = useMemo(() => {
     return transactions.filter((t) => {
       const d = new Date(t.date);
@@ -48,20 +53,20 @@ const Analytics = () => {
     });
   }, [transactions, dateRange]);
 
-  // Filtered Supplies
   const filteredSupplies = useMemo(() => {
     return supplies.filter((s) => {
       return s.date.startsWith(monthFilter);
     });
   }, [supplies, monthFilter]);
 
+  // --- Key Metrics Calculations ---
+
   // 1. TOTAL VALUE OF SOLD ITEMS (Gross Revenue)
   const totalValueSoldItems = useMemo(() => {
     return filteredTransactions.reduce((sum, txn) => sum + txn.total, 0);
   }, [filteredTransactions]);
 
-  // 2. VENDOR'S TOTAL SALES (Total Supplies Purchased / Expenses)
-  // This represents what the business bought from vendors
+  // 2. VENDOR'S TOTAL SALES (Total value of supplies purchased in period)
   const vendorsTotalSales = useMemo(() => {
     return filteredSupplies.reduce(
       (sum, s) => sum + s.costPrice * s.quantity,
@@ -69,7 +74,7 @@ const Analytics = () => {
     );
   }, [filteredSupplies]);
 
-  // Helper: Cost of Goods Sold (COGS) - Needed for Profit Margin
+  // Helper: Cost of Goods Sold (COGS) for all filtered transactions
   const totalCOGS = useMemo(() => {
     return filteredTransactions.reduce((acc, txn) => {
       const txnCost = txn.items.reduce((itemAcc, item) => {
@@ -82,7 +87,6 @@ const Analytics = () => {
   }, [filteredTransactions, products]);
 
   // 3. TOTAL PROFIT MARGIN (%)
-  // Formula: ((Revenue - COGS) / Revenue) * 100
   const totalProfitMargin = useMemo(() => {
     if (totalValueSoldItems === 0) return 0;
     const profit = totalValueSoldItems - totalCOGS;
@@ -91,14 +95,13 @@ const Analytics = () => {
 
   // 4. TOTAL VALUE OF UNSOLD ITEMS (Historical Inventory Value)
   const totalValueUnsoldItems = useMemo(() => {
-    // 1. Start with current stock
     const stockMap = new Map<string, number>();
-    products.forEach((p) => stockMap.set(p.id, p.stock));
+    products.forEach((p) => {
+      stockMap.set(p.id, p.stock);
+    });
 
-    // 2. Rollback to the end of selected month
     const targetEndTime = dateRange.end.getTime();
 
-    // Reverse Sales happened AFTER target month
     transactions.forEach((t) => {
       const tTime = new Date(t.date).getTime();
       if (tTime > targetEndTime) {
@@ -109,7 +112,6 @@ const Analytics = () => {
       }
     });
 
-    // Reverse Supplies happened AFTER target month
     supplies.forEach((s) => {
       const sTime = new Date(s.date).getTime();
       if (sTime > targetEndTime) {
@@ -118,7 +120,6 @@ const Analytics = () => {
       }
     });
 
-    // 3. Calculate Value
     let total = 0;
     stockMap.forEach((qty, productId) => {
       const product = products.find((p) => p.id === productId);
@@ -130,22 +131,26 @@ const Analytics = () => {
     return total;
   }, [products, transactions, supplies, dateRange]);
 
-  // --- 2. Chart Data Preparation ---
-
-  //   const financialReportData = useMemo(() => [
-  //     { name: 'Realized Revenue', value: totalRealizedRevenue, color: '#10b981' },   // Green
-  //     { name: 'Cost of Sales', value: totalRealizedCOGS, color: '#ef4444' }, // Red
-  //     { name: 'Realized Profit', value: totalRealizedProfit, color: '#3b82f6' },  // Blue
-  //     { name: 'Unsold Stock', value: totalUnsoldValue, color: '#f97316' } // Orange
-  //   ], [totalRealizedRevenue, totalRealizedCOGS, totalRealizedProfit, totalUnsoldValue]);
+  const financialReportData = useMemo(
+    () => [
+      {
+        name: "Sold Value",
+        value: totalValueSoldItems,
+        color: "#10b981",
+      },
+      { name: "Vendor Sales", value: vendorsTotalSales, color: "#ef4444" },
+      {
+        name: "Profit",
+        value: totalValueSoldItems - totalCOGS,
+        color: "#3b82f6",
+      },
+      { name: "Unsold Value", value: totalValueUnsoldItems, color: "#f97316" },
+    ],
+    [totalValueSoldItems, vendorsTotalSales, totalCOGS, totalValueUnsoldItems],
+  );
 
   const topSellingItems = useMemo(() => {
     const itemMap = new Map<string, number>();
-
-    // Use realized transactions for top selling items if we want to align with revenue
-    // Or keep all transactions? Usually "Top Selling" includes credit sales.
-    // Let's stick to filteredTransactions (all sales) for item popularity,
-    // but revenue metrics are realized.
     filteredTransactions.forEach((txn) => {
       txn.items.forEach((item) => {
         const current = itemMap.get(item.name) || 0;
@@ -159,31 +164,50 @@ const Analytics = () => {
       .slice(0, 5);
   }, [filteredTransactions]);
 
-  // --- Helper Components ---
   const MetricCard = ({
     title,
     value,
     icon: Icon,
     colorClass,
     subText,
+    isPercentage,
   }: any) => (
     <div className="flex items-start justify-between rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
       <div>
         <p className="mb-1 text-sm font-medium text-gray-500">{title}</p>
         <h3 className="text-2xl font-bold text-gray-800">
-          ₦
+          {!isPercentage && "₦"}
           {value.toLocaleString(undefined, {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
           })}
+          {isPercentage && "%"}
         </h3>
         {subText && <p className="mt-2 text-xs text-gray-400">{subText}</p>}
       </div>
       <div className={`p-3 rounded-full ${colorClass} bg-opacity-10`}>
-        <Icon size={24} className={colorClass.replace("bg-", "text-")} />
+        <Icon size={24} className={colorClass.split(" ")[1]} />
       </div>
     </div>
   );
+
+  const isLoading =
+    productsQuery.isLoading ||
+    transactionsQuery.isLoading ||
+    supplyEntriesQuery.isLoading;
+
+  if (isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <LoaderCircle className="h-12 w-12 animate-spin text-pink-600 opacity-20" />
+          <p className="font-medium text-gray-500">
+            Analyzing business data...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full animate-in flex-col gap-6 overflow-y-auto pr-2 pb-4 duration-300 fade-in">
@@ -216,72 +240,89 @@ const Analytics = () => {
       </div>
 
       {/* Metrics Grid */}
-      {/* <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCard 
-            title="Net Realized Revenue" 
-            value={totalRealizedRevenue} 
-            icon={DollarSign} 
-            colorClass="bg-green-500 text-green-600"
-            subText="Cash/POS/Transfer sales (Excl. Credit)"
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <MetricCard
+          title="TOTAL VALUE OF SOLD ITEMS"
+          value={totalValueSoldItems}
+          icon={DollarSign}
+          colorClass="bg-green-500 text-green-600"
+          subText="Gross revenue for period"
         />
-        <MetricCard 
-            title="Cost of Sales" 
-            value={totalRealizedCOGS} 
-            icon={CreditCard} 
-            colorClass="bg-red-500 text-red-600"
-            subText="COGS for realized sales"
+        <MetricCard
+          title="TOTAL VALUE OF UNSOLD ITEMS"
+          value={totalValueUnsoldItems}
+          icon={Package}
+          colorClass="bg-orange-500 text-orange-600"
+          subText="Inventory value at end of month"
         />
-        <MetricCard 
-            title="Realized Profit" 
-            value={totalRealizedProfit} 
-            icon={TrendingUp} 
-            colorClass="bg-blue-500 text-blue-600"
-            subText="Realized Revenue - COGS"
+        <MetricCard
+          title="VENDOR'S TOTAL SALES"
+          value={vendorsTotalSales}
+          icon={CreditCard}
+          colorClass="bg-red-500 text-red-600"
+          subText="Total supplies purchased"
         />
-        <MetricCard 
-            title="Unsold Inventory" 
-            value={totalUnsoldValue} 
-            icon={Package} 
-            colorClass="bg-orange-500 text-orange-600"
-            subText="Stock value at end of month"
+        <MetricCard
+          title="TOTAL PROFIT MARGIN"
+          value={totalProfitMargin}
+          icon={TrendingUp}
+          colorClass="bg-blue-500 text-blue-600"
+          isPercentage
+          subText="Gross Profit / Revenue"
         />
-      </div> */}
+      </div>
 
       {/* Charts Section */}
-      <div className="grid min-h-[400px] flex-1 grid-cols-1 gap-6 lg:grid-cols-3">
+      <div className="grid min-h-100 flex-1 grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Sales Report Chart */}
         <div className="flex flex-col rounded-xl border border-gray-100 bg-white p-6 shadow-sm lg:col-span-2">
           <h3 className="mb-6 text-lg font-bold text-gray-800">
             Sales Report ({monthFilter})
           </h3>
-          <div className="min-h-[300px] w-full flex-1">
+          <div className="min-h-75 w-full flex-1">
             <ResponsiveContainer width="100%" height="100%">
-              <div></div>
-              {/* <BarChart data={financialReportData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-                        <XAxis 
-                            dataKey="name" 
-                            axisLine={false} 
-                            tickLine={false} 
-                            tick={{fill: '#4b5563', fontSize: 12, fontWeight: 500}} 
-                        />
-                        <YAxis 
-                            axisLine={false} 
-                            tickLine={false} 
-                            tick={{fill: '#9ca3af', fontSize: 12}} 
-                            tickFormatter={(value) => `₦${value}`} 
-                        />
-                        <Tooltip 
-                            cursor={{fill: '#f3f4f6'}}
-                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                            formatter={(value: number) => [`₦${value.toLocaleString()}`, 'Value']}
-                        />
-                        <Bar dataKey="value" radius={[6, 6, 0, 0]} barSize={60}>
-                            {financialReportData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.color} />
-                            ))}
-                        </Bar>
-                    </BarChart> */}
+              <BarChart
+                data={financialReportData}
+                margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  vertical={false}
+                  stroke="#f3f4f6"
+                />
+                <XAxis
+                  dataKey="name"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fill: "#4b5563", fontSize: 12, fontWeight: 500 }}
+                />
+                <YAxis
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fill: "#9ca3af", fontSize: 12 }}
+                  tickFormatter={(value) => `₦${value}`}
+                />
+                <Tooltip
+                  cursor={{ fill: "#f3f4f6" }}
+                  contentStyle={{
+                    borderRadius: "8px",
+                    border: "none",
+                    boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
+                  }}
+                  formatter={(value: number | undefined) => [
+                    `₦${value?.toLocaleString() ?? 0}`,
+                    "Value",
+                  ]}
+                />
+                <Bar dataKey="value" radius={[6, 6, 0, 0]} barSize={60}>
+                  {financialReportData.map((entry, index) => (
+                    <Cell
+                      key={`cell-${crypto.randomUUID()}`}
+                      fill={entry.color}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
@@ -306,7 +347,7 @@ const Analytics = () => {
             ) : (
               topSellingItems.map((item, index) => (
                 <div
-                  key={index}
+                  key={crypto.randomUUID()}
                   className="group flex items-center justify-between"
                 >
                   <div className="flex items-center gap-3">

@@ -11,9 +11,11 @@ import {
 import { z } from "zod";
 
 // Accept date as YYYY-MM-DD string (form uses that)
-const createSupplyEntryInputSchema = insertSupplyEntrySchema.omit({ id: true }).extend({
-  date: z.string().min(1, "Date is required"),
-});
+const createSupplyEntryInputSchema = insertSupplyEntrySchema
+  .omit({ id: true })
+  .extend({
+    date: z.string().min(1, "Date is required"),
+  });
 const updateSupplyEntryInputSchema = updateSupplyEntrySchema.extend({
   id: z.string().min(1, "Supply entry ID is required"),
 });
@@ -70,7 +72,9 @@ export const createSupplyEntry = authorized
           .returning();
 
         if (!entry) {
-          throw new Error("Database failed to return the inserted supply entry");
+          throw new Error(
+            "Database failed to return the inserted supply entry",
+          );
         }
 
         // 2. Update product stock and prices
@@ -123,7 +127,8 @@ export const updateSupplyEntry = authorized
         .where(eq(supplyEntries.id, id));
       if (!existing) throw new Error("Supply entry not found");
 
-      const quantityDiff = (data.quantity ?? existing.quantity) - existing.quantity;
+      const quantityDiff =
+        (data.quantity ?? existing.quantity) - existing.quantity;
       const [updated] = await tx
         .update(supplyEntries)
         .set(data)
@@ -142,7 +147,9 @@ export const updateSupplyEntry = authorized
           .set({
             stock: newStock,
             ...(data.costPrice != null && { costPrice: data.costPrice }),
-            ...(data.sellingPrice != null && { sellingPrice: data.sellingPrice }),
+            ...(data.sellingPrice != null && {
+              sellingPrice: data.sellingPrice,
+            }),
           })
           .where(eq(products.id, existing.productId));
       } else if (data.costPrice != null || data.sellingPrice != null) {
@@ -150,7 +157,9 @@ export const updateSupplyEntry = authorized
           .update(products)
           .set({
             ...(data.costPrice != null && { costPrice: data.costPrice }),
-            ...(data.sellingPrice != null && { sellingPrice: data.sellingPrice }),
+            ...(data.sellingPrice != null && {
+              sellingPrice: data.sellingPrice,
+            }),
           })
           .where(eq(products.id, existing.productId));
       }

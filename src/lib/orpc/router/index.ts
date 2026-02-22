@@ -1,4 +1,8 @@
-import { createProduct, getProducts, updateProduct } from "@/lib/orpc/router/products";
+import {
+  createProduct,
+  getProducts,
+  updateProduct,
+} from "@/lib/orpc/router/products";
 import { createEventLog, getEventLogs } from "@/lib/orpc/router/event-log";
 import {
   createSupplyEntry,

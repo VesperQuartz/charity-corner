@@ -273,25 +273,24 @@ const VendorPage = () => {
           isPaid: false,
         };
 
-              try {
-                if (editingSupplyId) {
-                  await updateSupplyEntryMutation.mutateAsync({
-                    id: editingSupplyId,
-                    ...payload,
-                  });
-                  toast.success("Supply record updated successfully");
-                } else {
-                  await createSupplyEntryMutation.mutateAsync(payload);
-                  toast.success("New supply record added successfully");
-                }
-                closeSupplyModal();
-              } catch (err) {
-                console.error("Mutation Error Details:", err);
-                toast.error(
-                  err instanceof Error ? err.message : "Failed to save supply entry",
-                );
-              }
-        
+        try {
+          if (editingSupplyId) {
+            await updateSupplyEntryMutation.mutateAsync({
+              id: editingSupplyId,
+              ...payload,
+            });
+            toast.success("Supply record updated successfully");
+          } else {
+            await createSupplyEntryMutation.mutateAsync(payload);
+            toast.success("New supply record added successfully");
+          }
+          closeSupplyModal();
+        } catch (err) {
+          console.error("Mutation Error Details:", err);
+          toast.error(
+            err instanceof Error ? err.message : "Failed to save supply entry",
+          );
+        }
       });
     },
   });
