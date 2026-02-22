@@ -1,11 +1,6 @@
 import type { InsertProduct } from "@/repo/schema";
 
-export enum PaymentMethod {
-  CASH = "CASH",
-  TRANSFER = "TRANSFER",
-  POS = "POS",
-  CREDIT = "CREDIT",
-}
+export type PaymentMethod = "CASH" | "TRANSFER" | "POS" | "CREDIT";
 
 export type UserRole = "admin" | "cashier";
 

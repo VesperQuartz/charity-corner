@@ -2,11 +2,11 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Calendar, CheckCircle, LoaderCircle, X } from "lucide-react";
-import React, { Activity, useMemo, useState, useTransition } from "react";
+import React, { Activity } from "react";
 import { toast } from "react-hot-toast/headless";
 import { useAuth } from "@/context/AuthContext";
 import { orpc } from "@/lib/orpc";
-import { PaymentMethod, type Transaction } from "@/types";
+import type { Transaction } from "@/types";
 
 const History = () => {
   const queryClient = useQueryClient();
@@ -91,9 +91,7 @@ const History = () => {
   const displayedTransactions = React.useMemo(() => {
     if (activeTab === "debtors") {
       // Show all outstanding credit transactions
-      return transactions.filter(
-        (t) => t.paymentMethod === PaymentMethod.CREDIT,
-      );
+      return transactions.filter((t) => t.paymentMethod === "CREDIT");
     }
 
     // For 'log' and 'summary', use the date-filtered list
@@ -101,9 +99,7 @@ const History = () => {
     // The user said "separate the debtors from the transaction log".
     // So let's exclude CREDIT from 'log'.
     if (activeTab === "log") {
-      return filteredTransactions.filter(
-        (t) => t.paymentMethod !== PaymentMethod.CREDIT,
-      );
+      return filteredTransactions.filter((t) => t.paymentMethod !== "CREDIT");
     }
 
     return filteredTransactions;
@@ -156,7 +152,7 @@ const History = () => {
     let debt = 0;
 
     filteredTransactions.forEach((t) => {
-      if (t.paymentMethod === PaymentMethod.CREDIT) {
+      if (t.paymentMethod === "CREDIT") {
         debt += t.total;
       } else {
         sales += t.total;
@@ -176,7 +172,7 @@ const History = () => {
       startTransition(async () => {
         await updateTransactionMutation.mutateAsync({
           id: selectedTxn.id,
-          paymentMethod: PaymentMethod.CASH,
+          paymentMethod: "CASH",
         });
       });
     }
@@ -413,7 +409,12 @@ const History = () => {
                         <td className="px-6 py-4 text-center align-top">
                           <button
                             type="button"
-                            onClick={() => handleMarkAsPaid(txn)}
+                            onClick={() =>
+                              handleMarkAsPaid({
+                                ...txn,
+                                debtorName: txn.debtorName ?? "",
+                              })
+                            }
                             className="mx-auto flex items-center gap-1 rounded border border-blue-200 bg-blue-50 px-3 py-1 text-xs text-blue-600 transition-colors hover:bg-blue-100 hover:text-blue-800"
                             title="Mark as Paid"
                           >
@@ -444,7 +445,7 @@ const History = () => {
                     </td>
                   </tr>
                 ) : (
-                  summaryData.map((item, idx) => (
+                  summaryData.map((item) => (
                     <tr
                       key={crypto.randomUUID()}
                       className="border-b bg-white hover:bg-gray-50"

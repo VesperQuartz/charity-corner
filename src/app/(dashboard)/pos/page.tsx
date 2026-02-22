@@ -22,19 +22,18 @@ import z from "zod";
 import { FormError } from "@/components/error-form";
 import { useAuth } from "@/context/AuthContext";
 import { orpc } from "@/lib/orpc";
-import { InsertProduct } from "@/repo/schema";
+import { InsertProduct, paymentMethodValues } from "@/repo/schema";
 import { CartItem, PaymentMethod, Transaction } from "@/types";
 
 const paymentFormSchema = z
   .object({
-    paymentMethod: z.nativeEnum(PaymentMethod),
+    paymentMethod: z.enum(paymentMethodValues),
     amountTendered: z.string(),
     debtorName: z.string(),
   })
   .refine(
     (data) =>
-      data.paymentMethod !== PaymentMethod.CREDIT ||
-      data.debtorName.trim().length > 0,
+      data.paymentMethod !== "CREDIT" || data.debtorName.trim().length > 0,
     {
       message: "Debtor name is required for store credit.",
       path: ["debtorName"],
@@ -148,7 +147,7 @@ const PaymentModalForm = ({
 }) => {
   const paymentForm = useForm({
     defaultValues: {
-      paymentMethod: PaymentMethod.CASH,
+      paymentMethod: "CASH",
       amountTendered: total.toString(),
       debtorName: "",
     },
@@ -166,11 +165,9 @@ const PaymentModalForm = ({
           })),
           subtotal: cart.reduce((s, i) => s + i.sellingPrice * i.quantity, 0),
           total,
-          paymentMethod: value.paymentMethod,
+          paymentMethod: value.paymentMethod as PaymentMethod,
           debtorName:
-            value.paymentMethod === PaymentMethod.CREDIT
-              ? value.debtorName
-              : undefined,
+            value.paymentMethod === "CREDIT" ? value.debtorName : undefined,
         },
         {
           onSuccess: (data) => {
@@ -211,15 +208,15 @@ const PaymentModalForm = ({
         >
           <div className="grid grid-cols-2 gap-3">
             {[
-              { id: PaymentMethod.CASH, icon: Banknote, label: "Cash" },
-              { id: PaymentMethod.POS, icon: CreditCard, label: "Card / POS" },
+              { id: "CASH", icon: Banknote, label: "Cash" },
+              { id: "POS", icon: CreditCard, label: "Card / POS" },
               {
-                id: PaymentMethod.TRANSFER,
+                id: "TRANSFER",
                 icon: Smartphone,
                 label: "Transfer",
               },
               {
-                id: PaymentMethod.CREDIT,
+                id: "CREDIT",
                 icon: Receipt,
                 label: "Store Credit",
               },
@@ -241,7 +238,7 @@ const PaymentModalForm = ({
 
           <paymentForm.Field name="paymentMethod">
             {(paymentMethodField) =>
-              paymentMethodField.state.value === PaymentMethod.CASH ? (
+              paymentMethodField.state.value === "CASH" ? (
                 <paymentForm.Field name="amountTendered">
                   {(field) => (
                     <div className="space-y-2">
@@ -280,7 +277,7 @@ const PaymentModalForm = ({
 
           <paymentForm.Field name="paymentMethod">
             {(paymentMethodField) =>
-              paymentMethodField.state.value === PaymentMethod.CREDIT ? (
+              paymentMethodField.state.value === "CREDIT" ? (
                 <paymentForm.Field name="debtorName">
                   {(field) => (
                     <div className="space-y-2">
@@ -507,7 +504,7 @@ const POS = () => {
     doc.setFontSize(8);
     doc.setFont("helvetica", "normal");
     const paymentText =
-      lastTransaction.paymentMethod === PaymentMethod.CREDIT
+      lastTransaction.paymentMethod === "CREDIT"
         ? "Bought via Credit"
         : `Paid via ${lastTransaction.paymentMethod}`;
 
@@ -558,7 +555,7 @@ const POS = () => {
             </div>
             <div className="flex justify-between text-gray-500">
               <span>
-                {lastTransaction.paymentMethod === PaymentMethod.CREDIT
+                {lastTransaction.paymentMethod === "CREDIT"
                   ? "Bought via Credit"
                   : `Paid via ${lastTransaction.paymentMethod}`}
               </span>
