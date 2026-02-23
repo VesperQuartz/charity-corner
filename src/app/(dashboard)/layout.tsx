@@ -9,6 +9,7 @@ import {
   Truck,
   Users,
 } from "lucide-react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { PageLoader } from "@/components/loading";
 import NavLink from "@/components/navlink";
@@ -47,11 +48,13 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
     <div className="flex h-screen overflow-hidden bg-gray-100">
       {/* Sidebar */}
       <aside className="z-10 flex w-64 flex-col bg-gray-900 text-white shadow-xl">
-        <div className="flex items-center gap-3 border-b border-gray-800 p-6">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-pink-500 text-xl font-bold">
-            C
-          </div>
-          <h1 className="text-xl font-bold tracking-tight">Charity Corner</h1>
+        <div className="flex items-center gap-3 border-b border-gray-800 p-2">
+          <Image
+            src="/logo_1.png"
+            alt="Charity Corner"
+            width={300}
+            height={300}
+          />
         </div>
 
         <nav className="flex-1 space-y-2 overflow-y-auto p-4">
