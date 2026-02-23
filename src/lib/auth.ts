@@ -1,10 +1,10 @@
+import { createId } from "@paralleldrive/cuid2";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
 import { admin, bearer, openAPI, username } from "better-auth/plugins";
-import { db } from "./database";
 import { eventLog } from "@/repo/schema/event-log";
-import { createId } from "@paralleldrive/cuid2";
+import { db } from "./database";
 import { ac, adminRole, customRole, userRole } from "./permission";
 
 export const auth = betterAuth({

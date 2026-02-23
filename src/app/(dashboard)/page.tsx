@@ -1,12 +1,11 @@
-"use client";
-import { useQuery } from "@tanstack/react-query";
-import { orpc } from "@/lib/orpc";
+import type { Metadata } from "next";
+import Dashboard from "@/components/pages/dashboard";
 
-export default function Home() {
-  const todos = useQuery(orpc.getTodo.queryOptions());
-  return (
-    <div className="grid min-h-screen grid-rows-[20px_1fr_20px] items-center justify-items-center gap-16 p-8 pb-20 font-(family-name:--font-geist-sans) sm:p-20">
-      Hello {todos.data?.[0].name}
-    </div>
-  );
+export const metadata: Metadata = {
+  title: "Dashboard | Charity Corner",
+  description: "Charity Corner dashboard",
+};
+
+export default function DashboardPage() {
+  return <Dashboard />;
 }
