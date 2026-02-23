@@ -548,7 +548,7 @@ const POS = () => {
               </div>
             ))}
           </div>
-          <div className="space-y-1 border-t pt-4">
+          <div className="space-y-1 border-t pt-4 pb-4">
             <div className="flex justify-between font-bold">
               <span>Total</span>
               <span>₦{lastTransaction.total.toFixed(2)}</span>
@@ -560,6 +560,16 @@ const POS = () => {
                   : `Paid via ${lastTransaction.paymentMethod}`}
               </span>
             </div>
+          </div>
+          <div className="space-y-1 border-t pt-4">
+            {lastTransaction.debtorName ? (
+              <div className="flex flex-col justify-between font-bold">
+                <span>Name</span>
+                <span className="text-gray-500">
+                  {lastTransaction.debtorName}
+                </span>
+              </div>
+            ) : null}
           </div>
         </div>
         <div className="flex gap-4">

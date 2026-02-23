@@ -59,6 +59,7 @@ const VendorPage = () => {
   const vendorsQuery = useQuery(orpc.getVendors.queryOptions());
   const productsQuery = useQuery(orpc.getProducts.queryOptions());
   const supplyEntriesQuery = useQuery(orpc.getSupplyEntries.queryOptions());
+  const t = useQuery(orpc.getTransactions.queryOptions());
 
   const createVendorMutation = useMutation(
     orpc.createVendor.mutationOptions({
@@ -831,6 +832,28 @@ const VendorPage = () => {
       });
   }, [supplies, products, selectedVendorId]);
 
+  const vendorCOGS = useMemo(() => {
+    if (!selectedVendorId) return 0;
+
+    // Get all products for this vendor
+    const vendorProductIds = new Set(
+      products.filter((p) => p.vendorId === selectedVendorId).map((p) => p.id),
+    );
+    // Sum up cost of sold items (COGS)
+    return t.data?.reduce((total, txn) => {
+      const txnCost = txn.items.reduce((itemTotal, item) => {
+        if (vendorProductIds.has(item.productId)) {
+          const product = products.find((p) => p.id === item.productId);
+          if (product) {
+            return itemTotal + item.quantity * product.costPrice;
+          }
+        }
+        return itemTotal;
+      }, 0);
+      return total + txnCost;
+    }, 0);
+  }, [products, selectedVendorId]);
+
   return (
     <div className="relative h-full">
       {selectedVendorId && selectedVendor ? (
@@ -915,6 +938,16 @@ const VendorPage = () => {
               <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 p-4">
                 <h3 className="flex items-center gap-2 font-bold text-gray-800">
                   <Package size={18} className="text-pink-600" /> Supply History
+                  <span className="ml-4 text-xs font-normal text-gray-500 bg-white px-2 py-1 rounded border border-gray-200 shadow-sm hidden md:inline-block">
+                    Total COGS:{" "}
+                    <span className="font-bold text-gray-900">
+                      ₦
+                      {vendorCOGS.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </span>
+                  </span>
                 </h3>
                 <div className="flex gap-2">
                   <button
@@ -1137,16 +1170,6 @@ const VendorPage = () => {
                               key: "costPrice",
                               align: "text-right",
                             },
-                            {
-                              label: "Selling Price",
-                              key: "sellingPrice",
-                              align: "text-right",
-                            },
-                            {
-                              label: "Profit",
-                              key: "marginAmount",
-                              align: "text-right",
-                            },
                           ].map((col) => (
                             <th
                               key={col.key}
@@ -1196,16 +1219,6 @@ const VendorPage = () => {
                               </td>
                               <td className="px-6 py-4 text-right font-mono">
                                 ₦{row.costPrice.toFixed(2)}
-                              </td>
-                              <td className="px-6 py-4 text-right font-mono">
-                                ₦{row.sellingPrice.toFixed(2)}
-                              </td>
-                              <td className="px-6 py-4 text-right">
-                                <div className="flex flex-col items-end">
-                                  <span className="font-bold text-green-600">
-                                    ₦{row.marginAmount.toFixed(2)}
-                                  </span>
-                                </div>
                               </td>
                               <td className="px-6 py-4 text-center">
                                 <div className="flex justify-center gap-2">

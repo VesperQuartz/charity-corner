@@ -264,11 +264,22 @@ const Analytics = () => {
         />
         <MetricCard
           title="TOTAL PROFIT MARGIN"
-          value={totalProfitMargin}
+          // value={totalProfitMargin}
+          value={
+            totalValueSoldItems + totalValueUnsoldItems - vendorsTotalSales
+          }
           icon={() => <TrendingUp className="" />}
           colorClass="bg-[#CDDDFF] text-blue-600"
           isPercentage={false}
           subText="Gross Profit / Revenue"
+        />
+        <MetricCard
+          title="EXPECTED SALE"
+          value={totalValueSoldItems + totalValueUnsoldItems}
+          icon={() => <TrendingUp className="" />}
+          colorClass="bg-[#CDDDFF] text-blue-600"
+          isPercentage={false}
+          subText="Expected Profit"
         />
       </div>
 

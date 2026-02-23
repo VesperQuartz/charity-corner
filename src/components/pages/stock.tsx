@@ -263,6 +263,19 @@ const Stock = () => {
                   Selling Price {sortKey === "price" && "↑"}
                 </th>
                 <th
+                  className="cursor-pointer px-6 py-4 font-semibold tracking-wider transition-colors hover:bg-gray-100"
+                  onClick={() => setSortKey("price")}
+                >
+                  Cost Price {sortKey === "price" && "↑"}
+                </th>
+                <th
+                  className="cursor-pointer px-6 py-4 font-semibold tracking-wider transition-colors hover:bg-gray-100"
+                  onClick={() => setSortKey("price")}
+                >
+                  Profit {sortKey === "price" && "↑"}
+                </th>
+
+                <th
                   className="cursor-pointer px-6 py-4 text-center font-semibold tracking-wider transition-colors hover:bg-gray-100"
                   onClick={() => setSortKey("stock")}
                 >
@@ -330,6 +343,20 @@ const Stock = () => {
                           ₦{product.sellingPrice.toFixed(2)}
                         </div>
                       </td>
+                      <td className="px-6 py-4 align-middle">
+                        <div className="text-sm font-medium text-gray-900">
+                          ₦{product.costPrice.toFixed(2)}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 align-middle">
+                        <div className="text-sm font-medium text-gray-900">
+                          ₦
+                          {(product.sellingPrice - product.costPrice).toFixed(
+                            2,
+                          )}
+                        </div>
+                      </td>
+
                       <td className="px-6 py-4 text-center align-middle">
                         <span
                           className={`text-sm font-bold px-2 py-1 rounded ${product.stock < 10 ? "bg-red-100 text-red-600" : "text-gray-900"}`}
