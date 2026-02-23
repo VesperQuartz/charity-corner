@@ -10,6 +10,7 @@ import {
   Users,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { PageLoader } from "@/components/loading";
 import NavLink from "@/components/navlink";
 import { AuthProvider } from "@/context/AuthContext";
 import { StoreProvider } from "@/context/StoreContext";
@@ -38,7 +39,7 @@ const SidebarLink: React.FC<{
 const AppLayout = ({ children }: { children: React.ReactNode }) => {
   const navigate = useRouter();
   const auth = authClient.useSession();
-  if (auth.isPending) return <div>Loading...</div>;
+  if (auth.isPending) return <PageLoader />;
 
   const isAdmin = auth.data?.user.role === "admin";
 

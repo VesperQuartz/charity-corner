@@ -90,7 +90,7 @@ const Analytics = () => {
   const totalProfitMargin = useMemo(() => {
     if (totalValueSoldItems === 0) return 0;
     const profit = totalValueSoldItems - totalCOGS;
-    return (profit / totalValueSoldItems) * 100;
+    return profit;
   }, [totalValueSoldItems, totalCOGS]);
 
   // 4. TOTAL VALUE OF UNSOLD ITEMS (Historical Inventory Value)
@@ -267,7 +267,7 @@ const Analytics = () => {
           value={totalProfitMargin}
           icon={() => <TrendingUp className="" />}
           colorClass="bg-[#CDDDFF] text-blue-600"
-          isPercentage
+          isPercentage={false}
           subText="Gross Profit / Revenue"
         />
       </div>
