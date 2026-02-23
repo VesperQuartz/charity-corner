@@ -938,11 +938,11 @@ const VendorPage = () => {
               <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 p-4">
                 <h3 className="flex items-center gap-2 font-bold text-gray-800">
                   <Package size={18} className="text-pink-600" /> Supply History
-                  <span className="ml-4 text-xs font-normal text-gray-500 bg-white px-2 py-1 rounded border border-gray-200 shadow-sm hidden md:inline-block">
+                  <span className="ml-4 hidden rounded border border-gray-200 bg-white px-2 py-1 text-xs font-normal text-gray-500 shadow-sm md:inline-block">
                     Total COGS:{" "}
                     <span className="font-bold text-gray-900">
                       ₦
-                      {vendorCOGS.toLocaleString(undefined, {
+                      {vendorCOGS?.toLocaleString(undefined, {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}
