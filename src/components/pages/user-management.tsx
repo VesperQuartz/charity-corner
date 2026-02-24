@@ -135,7 +135,7 @@ const UserManagement = () => {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Create User Form */}
-        <div className="h-fit rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
+        <div className="h-112.5 overflow-y-scroll rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
           <h3 className="mb-4 flex items-center gap-2 text-lg font-bold text-gray-800">
             <UserPlus size={20} className="text-pink-600" /> Add New User
           </h3>
