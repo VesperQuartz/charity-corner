@@ -1,5 +1,6 @@
 "use client";
 import { useQuery } from "@tanstack/react-query";
+import { format, parseISO } from "date-fns";
 import {
   Calendar,
   CreditCard,
@@ -31,33 +32,43 @@ const Analytics = () => {
   const transactions = transactionsQuery.data ?? [];
   const supplies = supplyEntriesQuery.data ?? [];
 
-  // State for Month Filter (YYYY-MM)
-  const [monthFilter, setMonthFilter] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  });
+  // Date Range State (Matches History page style)
+  const [dateRange, setDateRange] = useState<{ start: string; end: string }>(
+    () => {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, "0");
+      const day = String(now.getDate()).padStart(2, "0");
+      const today = `${year}-${month}-${day}`;
+      return { start: today, end: today };
+    },
+  );
 
-  // Calculate Date Range
-  const dateRange = useMemo(() => {
-    const [year, month] = monthFilter.split("-").map(Number);
-    const start = new Date(year, month - 1, 1);
-    const end = new Date(year, month, 0, 23, 59, 59, 999);
+  // Parsed Date Objects for Filtering
+  const dateLimits = useMemo(() => {
+    const start = new Date(dateRange.start);
+    start.setHours(0, 0, 0, 0);
+
+    const end = new Date(dateRange.end);
+    end.setHours(23, 59, 59, 999);
+
     return { start, end };
-  }, [monthFilter]);
+  }, [dateRange]);
 
   // Filtered Data
   const filteredTransactions = useMemo(() => {
     return transactions.filter((t) => {
       const d = new Date(t.date);
-      return d >= dateRange.start && d <= dateRange.end;
+      return d >= dateLimits.start && d <= dateLimits.end;
     });
-  }, [transactions, dateRange]);
+  }, [transactions, dateLimits]);
 
   const filteredSupplies = useMemo(() => {
     return supplies.filter((s) => {
-      return s.date.startsWith(monthFilter);
+      const d = new Date(s.date);
+      return d >= dateLimits.start && d <= dateLimits.end;
     });
-  }, [supplies, monthFilter]);
+  }, [supplies, dateLimits]);
 
   // --- Key Metrics Calculations ---
 
@@ -74,33 +85,14 @@ const Analytics = () => {
     );
   }, [filteredSupplies]);
 
-  // Helper: Cost of Goods Sold (COGS) for all filtered transactions
-  const totalCOGS = useMemo(() => {
-    return filteredTransactions.reduce((acc, txn) => {
-      const txnCost = txn.items.reduce((itemAcc, item) => {
-        const product = products.find((p) => p.id === item.productId);
-        const cost = product ? product.costPrice : 0;
-        return itemAcc + cost * item.quantity;
-      }, 0);
-      return acc + txnCost;
-    }, 0);
-  }, [filteredTransactions, products]);
-
-  // 3. TOTAL PROFIT MARGIN (%)
-  const totalProfitMargin = useMemo(() => {
-    if (totalValueSoldItems === 0) return 0;
-    const profit = totalValueSoldItems - totalCOGS;
-    return profit;
-  }, [totalValueSoldItems, totalCOGS]);
-
-  // 4. TOTAL VALUE OF UNSOLD ITEMS (Historical Inventory Value)
+  // 3. TOTAL VALUE OF UNSOLD ITEMS (Historical Inventory Value)
   const totalValueUnsoldItems = useMemo(() => {
     const stockMap = new Map<string, number>();
     products.forEach((p) => {
       stockMap.set(p.id, p.stock);
     });
 
-    const targetEndTime = dateRange.end.getTime();
+    const targetEndTime = dateLimits.end.getTime();
 
     transactions.forEach((t) => {
       const tTime = new Date(t.date).getTime();
@@ -129,24 +121,36 @@ const Analytics = () => {
     });
 
     return total;
-  }, [products, transactions, supplies, dateRange]);
+  }, [products, transactions, supplies, dateLimits]);
 
   const financialReportData = useMemo(
     () => [
       {
+        id: "sold-value",
         name: "Sold Value",
         value: totalValueSoldItems,
         color: "#10b981",
       },
-      { name: "Vendor Sales", value: vendorsTotalSales, color: "#ef4444" },
       {
+        id: "vendor-sales",
+        name: "Vendor Sales",
+        value: vendorsTotalSales,
+        color: "#ef4444",
+      },
+      {
+        id: "profit",
         name: "Profit",
-        value: totalValueSoldItems - totalCOGS,
+        value: totalValueSoldItems + totalValueUnsoldItems - vendorsTotalSales,
         color: "#3b82f6",
       },
-      { name: "Unsold Value", value: totalValueUnsoldItems, color: "#f97316" },
+      {
+        id: "unsold-value",
+        name: "Unsold Value",
+        value: totalValueUnsoldItems,
+        color: "#f97316",
+      },
     ],
-    [totalValueSoldItems, vendorsTotalSales, totalCOGS, totalValueUnsoldItems],
+    [totalValueSoldItems, vendorsTotalSales, totalValueUnsoldItems],
   );
 
   const topSellingItems = useMemo(() => {
@@ -174,7 +178,9 @@ const Analytics = () => {
   }: any) => (
     <div className="flex items-start justify-between rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
       <div>
-        <p className="mb-1 text-sm font-medium text-gray-500">{title}</p>
+        <p className="mb-1 text-sm font-medium text-gray-500 uppercase">
+          {title}
+        </p>
         <h3 className="text-2xl font-bold text-gray-800">
           {!isPercentage && "₦"}
           {value.toLocaleString(undefined, {
@@ -218,24 +224,58 @@ const Analytics = () => {
             Business Analytics
           </h2>
           <p className="text-gray-500">
-            Financial performance report for{" "}
+            Performance from{" "}
             <span className="font-medium text-gray-800">
-              {new Date(dateRange.start).toLocaleString("default", {
-                month: "long",
-                year: "numeric",
-              })}
+              {format(parseISO(dateRange.start), "MMM d, yyyy")}
+            </span>{" "}
+            to{" "}
+            <span className="font-medium text-gray-800">
+              {format(parseISO(dateRange.end), "MMM d, yyyy")}
             </span>
           </p>
         </div>
 
-        <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
-          <Calendar size={18} className="ml-2 text-gray-500" />
-          <input
-            type="month"
-            value={monthFilter}
-            onChange={(e) => setMonthFilter(e.target.value)}
-            className="cursor-pointer border-none bg-transparent font-medium text-gray-700 outline-none focus:ring-0"
-          />
+        {/* Date Range Picker (Synced with History page style) */}
+        <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+          <div className="relative flex items-center border-r border-gray-100 pr-2">
+            <div className="pointer-events-none absolute left-2 text-gray-400">
+              <span className="text-[10px] font-bold uppercase">From</span>
+            </div>
+            <input
+              type="date"
+              value={dateRange.start}
+              onChange={(e) =>
+                setDateRange((prev) => ({ ...prev, start: e.target.value }))
+              }
+              className="w-32 bg-transparent py-1.5 pr-2 pl-12 text-sm font-medium text-gray-700 focus:outline-none"
+            />
+          </div>
+          <div className="relative flex items-center">
+            <div className="pointer-events-none absolute left-2 text-gray-400">
+              <span className="text-[10px] font-bold uppercase">To</span>
+            </div>
+            <input
+              type="date"
+              value={dateRange.end}
+              min={dateRange.start}
+              onChange={(e) =>
+                setDateRange((prev) => ({ ...prev, end: e.target.value }))
+              }
+              className="w-32 bg-transparent py-1.5 pr-2 pl-8 text-sm font-medium text-gray-700 focus:outline-none"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const now = new Date();
+              const today = now.toISOString().split("T")[0];
+              setDateRange({ start: today, end: today });
+            }}
+            className="rounded-full p-1 text-gray-400 transition-colors hover:bg-pink-50 hover:text-pink-500"
+            title="Reset to Today"
+          >
+            <Calendar size={16} />
+          </button>
         </div>
       </div>
 
@@ -244,42 +284,33 @@ const Analytics = () => {
         <MetricCard
           title="TOTAL VALUE OF SOLD ITEMS"
           value={totalValueSoldItems}
-          icon={() => <DollarSign className="" />}
+          icon={() => <DollarSign />}
           colorClass="bg-[#D0FFCD] text-green-600"
           subText="Gross revenue for period"
         />
         <MetricCard
           title="TOTAL VALUE OF UNSOLD ITEMS"
           value={totalValueUnsoldItems}
-          icon={() => <Package className="" />}
-          colorClass="bg-[#FFEDCD] text-red-600"
-          subText="Inventory value at end of month"
+          icon={() => <Package />}
+          colorClass="bg-[#FFEDCD] text-orange-600"
+          subText="Inventory value at end date"
         />
         <MetricCard
           title="VENDOR'S TOTAL SALES"
           value={vendorsTotalSales}
-          icon={() => <CreditCard className="" />}
+          icon={() => <CreditCard />}
           colorClass="bg-[#FFCDCD] text-red-600"
-          subText="Total supplies purchased"
+          subText="Supplies purchased in period"
         />
         <MetricCard
           title="TOTAL PROFIT MARGIN"
-          // value={totalProfitMargin}
           value={
             totalValueSoldItems + totalValueUnsoldItems - vendorsTotalSales
           }
-          icon={() => <TrendingUp className="" />}
+          icon={() => <TrendingUp />}
           colorClass="bg-[#CDDDFF] text-blue-600"
           isPercentage={false}
-          subText="Gross Profit / Revenue"
-        />
-        <MetricCard
-          title="EXPECTED SALE"
-          value={totalValueSoldItems + totalValueUnsoldItems}
-          icon={() => <TrendingUp className="" />}
-          colorClass="bg-[#CDDDFF] text-blue-600"
-          isPercentage={false}
-          subText="Expected Profit"
+          subText="Sold + Unsold - Cost"
         />
       </div>
 
@@ -288,7 +319,7 @@ const Analytics = () => {
         {/* Sales Report Chart */}
         <div className="flex flex-col rounded-xl border border-gray-100 bg-white p-6 shadow-sm lg:col-span-2">
           <h3 className="mb-6 text-lg font-bold text-gray-800">
-            Sales Report ({monthFilter})
+            Financial Comparison
           </h3>
           <div className="min-h-75 w-full flex-1">
             <ResponsiveContainer width="100%" height="100%">
@@ -326,11 +357,8 @@ const Analytics = () => {
                   ]}
                 />
                 <Bar dataKey="value" radius={[6, 6, 0, 0]} barSize={60}>
-                  {financialReportData.map((entry, index) => (
-                    <Cell
-                      key={`cell-${crypto.randomUUID()}`}
-                      fill={entry.color}
-                    />
+                  {financialReportData.map((entry) => (
+                    <Cell key={entry.id} fill={entry.color} />
                   ))}
                 </Bar>
               </BarChart>
@@ -358,7 +386,7 @@ const Analytics = () => {
             ) : (
               topSellingItems.map((item, index) => (
                 <div
-                  key={crypto.randomUUID()}
+                  key={item.name}
                   className="group flex items-center justify-between"
                 >
                   <div className="flex items-center gap-3">

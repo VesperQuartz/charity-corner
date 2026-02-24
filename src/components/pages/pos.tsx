@@ -225,7 +225,7 @@ const PaymentModalForm = ({
                 {(field) => (
                   <button
                     type="button"
-                    onClick={() => field.setValue(method.id)}
+                    onClick={() => field.setValue(method.id as PaymentMethod)}
                     className={`flex flex-col items-center justify-center rounded-lg border-2 p-4 transition-all ${field.state.value === method.id ? "border-pink-600 bg-pink-50 text-pink-700" : "border-gray-200 hover:border-gray-300"}`}
                   >
                     <method.icon size={24} className="mb-2" />
@@ -345,13 +345,6 @@ const POS = () => {
   const searchForm = useForm({
     defaultValues: { searchTerm: "" },
   });
-
-  const filteredProducts = useMemo(() => {
-    const term = searchForm.state.values.searchTerm ?? "";
-    return products.data?.filter((p) =>
-      p.name.toLowerCase().includes(term.toLowerCase()),
-    );
-  }, [products, searchForm.state.values.searchTerm]);
 
   const addToCart = (product: InsertProduct) => {
     setCart((prev) => {
@@ -616,25 +609,37 @@ const POS = () => {
           </searchForm.Field>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 overflow-y-auto pb-4 md:grid-cols-3 lg:grid-cols-4">
-          {filteredProducts?.map((product) => (
-            <button
-              type="button"
-              key={product.id}
-              onClick={() => addToCart(product)}
-              className="group flex flex-col rounded-lg border border-transparent bg-white p-4 text-left shadow-sm transition-shadow hover:border-pink-500 hover:shadow-md"
-            >
-              <h3 className="mb-1 line-clamp-1 text-lg font-semibold text-gray-800 group-hover:text-pink-600">
-                {product.name}
-              </h3>
-              <div className="mt-auto flex w-full items-center justify-between pt-4">
-                <span className="text-lg font-bold text-gray-900">
-                  ₦{product.sellingPrice.toFixed(2)}
-                </span>
+        <searchForm.Subscribe selector={(state) => state.values.searchTerm}>
+          {(searchTerm) => {
+            const term = searchTerm ?? "";
+            const filteredProducts =
+              products.data?.filter((p) =>
+                p.name.toLowerCase().includes(term.toLowerCase()),
+              ) ?? [];
+
+            return (
+              <div className="grid grid-cols-2 gap-4 overflow-y-auto pb-4 md:grid-cols-3 lg:grid-cols-4">
+                {filteredProducts.map((product) => (
+                  <button
+                    type="button"
+                    key={product.id}
+                    onClick={() => addToCart(product)}
+                    className="group flex flex-col rounded-lg border border-transparent bg-white p-4 text-left shadow-sm transition-shadow hover:border-pink-500 hover:shadow-md"
+                  >
+                    <h3 className="mb-1 line-clamp-1 text-lg font-semibold text-gray-800 group-hover:text-pink-600">
+                      {product.name}
+                    </h3>
+                    <div className="mt-auto flex w-full items-center justify-between pt-4">
+                      <span className="text-lg font-bold text-gray-900">
+                        ₦{product.sellingPrice.toFixed(2)}
+                      </span>
+                    </div>
+                  </button>
+                ))}
               </div>
-            </button>
-          ))}
-        </div>
+            );
+          }}
+        </searchForm.Subscribe>
       </div>
 
       {/* Cart Sidebar */}
