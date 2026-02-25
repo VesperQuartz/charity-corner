@@ -322,7 +322,7 @@ const Analytics = () => {
         />
         <MetricCard
           title="EXPECTED SALE"
-          value={totalValueSoldItems + totalValueUnsoldItems}
+          value={totalValueSoldItems + totalValueUnsoldItems + totalDebtMatrix}
           icon={() => <TrendingUp className="" />}
           colorClass="bg-[#CDDDFF] text-blue-600"
           isPercentage={false}
