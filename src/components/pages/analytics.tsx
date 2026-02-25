@@ -7,6 +7,7 @@ import {
   DollarSign,
   LoaderCircle,
   Package,
+  TrendingDown,
   TrendingUp,
 } from "lucide-react";
 import React, { useMemo, useState } from "react";
@@ -21,7 +22,6 @@ import {
   YAxis,
 } from "recharts";
 import { orpc } from "@/lib/orpc";
-import { PaymentMethod } from "@/types";
 
 const Analytics = () => {
   const productsQuery = useQuery(orpc.getProducts.queryOptions());
@@ -74,8 +74,16 @@ const Analytics = () => {
 
   // 1. TOTAL VALUE OF SOLD ITEMS (Gross Revenue)
   const totalValueSoldItems = useMemo(() => {
-    return filteredTransactions.reduce((sum, txn) => sum + txn.total, 0);
+    return filteredTransactions
+      .filter((item) => item.paymentMethod !== "CREDIT")
+      .reduce((sum, txn) => sum + txn.total, 0);
   }, [filteredTransactions]);
+
+  const totalDebtMatrix = useMemo(() => {
+    return transactions
+      .filter((item) => item.paymentMethod === "CREDIT")
+      .reduce((sum, txn) => sum + txn.total, 0);
+  }, [transactions]);
 
   // 2. VENDOR'S TOTAL SALES (Total value of supplies purchased in period)
   const vendorsTotalSales = useMemo(() => {
@@ -311,6 +319,22 @@ const Analytics = () => {
           colorClass="bg-[#CDDDFF] text-blue-600"
           isPercentage={false}
           subText="Sold + Unsold - Cost"
+        />
+        <MetricCard
+          title="EXPECTED SALE"
+          value={totalValueSoldItems + totalValueUnsoldItems}
+          icon={() => <TrendingUp className="" />}
+          colorClass="bg-[#CDDDFF] text-blue-600"
+          isPercentage={false}
+          subText="Expected Profit"
+        />
+        <MetricCard
+          title="TOTAL DEBT"
+          value={totalDebtMatrix}
+          icon={() => <TrendingDown className="" />}
+          colorClass="bg-[#FFCDCD] text-red-600"
+          isPercentage={false}
+          subText="Total Debt Matrix"
         />
       </div>
 
