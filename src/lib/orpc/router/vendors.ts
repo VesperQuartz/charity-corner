@@ -1,10 +1,13 @@
-import { eq } from "drizzle-orm";
+import { ORPCError } from "@orpc/server";
+import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/database";
 import { authorized } from "@/lib/orpc/context/authorized";
 import {
   eventLog,
   insertVendorSchema,
+  products,
+  supplyEntries,
   updateVendorSchema,
   vendors,
 } from "@/repo/schema";
@@ -71,17 +74,52 @@ export const updateVendor = authorized
 export const deleteVendor = authorized
   .input(deleteVendorInputSchema)
   .handler(async ({ input, context }) => {
-    await db.transaction(async (tx) => {
-      await tx.delete(vendors).where(eq(vendors.id, input.id));
+    try {
+      await db.transaction(async (tx) => {
+        // 1. Find all products belonging to this vendor
+        const vendorProducts = await tx
+          .select({ id: products.id })
+          .from(products)
+          .where(eq(products.vendorId, input.id));
+        
+        const productIds = vendorProducts.map((p) => p.id);
 
-      await tx.insert(eventLog).values({
-        timestamp: new Date().toISOString(),
-        action: "DELETE",
-        entity: "VENDOR",
-        entityId: input.id,
-        details: `Deleted vendor ID: ${input.id}`,
-        performedBy: context.user.name || context.user.id,
+        // 2. Delete supply entries referencing these products
+        if (productIds.length > 0) {
+          await tx
+            .delete(supplyEntries)
+            .where(inArray(supplyEntries.productId, productIds));
+        }
+
+        // 3. Delete supply entries directly linked to this vendor
+        await tx
+          .delete(supplyEntries)
+          .where(eq(supplyEntries.vendorId, input.id));
+
+        // 4. Delete the products
+        await tx.delete(products).where(eq(products.vendorId, input.id));
+        
+        // 5. Finally delete the vendor
+        const [deleted] = await tx.delete(vendors).where(eq(vendors.id, input.id)).returning();
+        if (!deleted) {
+          throw new ORPCError("NOT_FOUND", { message: "Vendor not found" });
+        }
+
+        await tx.insert(eventLog).values({
+          timestamp: new Date().toISOString(),
+          action: "DELETE",
+          entity: "VENDOR",
+          entityId: input.id,
+          details: `Deleted vendor: ${deleted.name} (ID: ${input.id})`,
+          performedBy: context.user.name || context.user.id,
+        });
       });
-    });
-    return { success: true };
+      return { success: true };
+    } catch (error) {
+      if (error instanceof ORPCError) throw error;
+      console.error("Delete Vendor Error:", error);
+      throw new ORPCError("INTERNAL_SERVER_ERROR", {
+        message: error instanceof Error ? error.message : "Failed to delete vendor",
+      });
+    }
   });

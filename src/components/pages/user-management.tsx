@@ -10,7 +10,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import React, { Activity } from "react";
-import { toast } from "react-hot-toast/headless";
+import { toast } from "sonner";
 import z from "zod";
 import { FormError } from "@/components/error-form";
 import { useAuth } from "@/context/AuthContext";

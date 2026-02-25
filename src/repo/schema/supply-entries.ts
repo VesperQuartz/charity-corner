@@ -17,10 +17,10 @@ export const supplyEntries = sqliteTable("supply_entries", {
   date: text("date").notNull(),
   vendorId: text("vendor_id")
     .notNull()
-    .references(() => vendors.id),
+    .references(() => vendors.id, { onDelete: "cascade" }),
   productId: text("product_id")
     .notNull()
-    .references(() => products.id),
+    .references(() => products.id, { onDelete: "cascade" }),
   quantity: real("quantity").notNull(),
   costPrice: real("cost_price").notNull(),
   sellingPrice: real("selling_price").notNull(),

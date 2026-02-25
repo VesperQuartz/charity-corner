@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Calendar, CheckCircle, LoaderCircle, X } from "lucide-react";
 import React, { Activity } from "react";
-import { toast } from "react-hot-toast/headless";
+import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
 import { orpc } from "@/lib/orpc";
 import type { Transaction } from "@/types";
@@ -62,9 +62,8 @@ const History = () => {
     return user ? user.name : "Unknown";
   };
 
-  // Filter Logic
+  // Filter Logic - based on date range
   const filteredTransactions = React.useMemo(() => {
-    // If no date selected (shouldn't happen with new logic, but safe guard), show all history
     if (!dateRange.start || !dateRange.end) {
       return transactions;
     }
@@ -82,32 +81,21 @@ const History = () => {
   }, [transactions, dateRange]);
 
   // Separate transactions based on tab logic
-  // If we are in 'debtors' tab, we might want to show ALL outstanding debt regardless of date?
-  // Or stick to the date filter? Usually debt is tracked globally.
-  // Let's assume for 'debtors' tab we show ALL outstanding credit transactions, ignoring the date filter,
-  // because a debtor might have bought yesterday.
-  // However, the user said "separate the debtors from the transaction log".
-
   const displayedTransactions = React.useMemo(() => {
     if (activeTab === "debtors") {
-      // Show all outstanding credit transactions
-      return transactions.filter((t) => t.paymentMethod === "CREDIT");
+      // Show credit transactions for the selected range
+      return filteredTransactions.filter((t) => t.paymentMethod === "CREDIT");
     }
 
-    // For 'log' and 'summary', use the date-filtered list
-    // And exclude CREDIT transactions from the main log if we are strictly separating them?
-    // The user said "separate the debtors from the transaction log".
-    // So let's exclude CREDIT from 'log'.
     if (activeTab === "log") {
+      // Show non-credit transactions for the selected range
       return filteredTransactions.filter((t) => t.paymentMethod !== "CREDIT");
     }
 
     return filteredTransactions;
-  }, [activeTab, transactions, filteredTransactions]);
+  }, [activeTab, filteredTransactions]);
 
-  // Summary Logic (keep based on date-filtered transactions, or should it include credit?)
-  // Usually summary is "Sales for today". Credit sales are still sales.
-  // So summary should probably include everything for that day.
+  // Summary Logic (based on filteredTransactions for the range)
   const summaryData = React.useMemo(() => {
     const map = new Map<
       string,

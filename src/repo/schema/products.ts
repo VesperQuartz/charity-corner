@@ -20,7 +20,7 @@ export const products = sqliteTable("products", {
   stock: integer("stock").notNull().default(0),
   vendorId: text("vendor_id")
     .notNull()
-    .references(() => vendors.id),
+    .references(() => vendors.id, { onDelete: "cascade" }),
   lastSupplyDate: text("last_supply_date"),
   lowStockThreshold: integer("low_stock_threshold"),
 });

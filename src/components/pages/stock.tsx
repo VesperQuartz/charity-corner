@@ -14,7 +14,7 @@ import {
   X,
 } from "lucide-react";
 import React, { Activity, useMemo, useState, useTransition } from "react";
-import { toast } from "react-hot-toast/headless";
+import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
 import { orpc } from "@/lib/orpc";
 import type { Product } from "@/types";
