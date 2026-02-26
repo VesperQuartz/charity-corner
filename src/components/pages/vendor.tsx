@@ -2,15 +2,12 @@
 /** biome-ignore-all lint/correctness/useExhaustiveDependencies: <explanation> */
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layers, Plus } from "lucide-react";
-import React, { useMemo, useState, useTransition } from "react";
+import React, { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { orpc } from "@/lib/orpc";
-import type { Vendor } from "@/types";
+import { useVendorPage } from "@/hooks/pages/use-vendor-page";
 import BulkSupplyModal from "./vendor/bulk-supply-modal";
 import BulkVendorModal from "./vendor/bulk-vendor-modal";
-// Import sub-components
 import DeleteModal from "./vendor/delete-modal";
 import SupplyLog from "./vendor/supply-log";
 import SupplyModal from "./vendor/supply-modal";
@@ -19,92 +16,22 @@ import VendorModal from "./vendor/vendor-modal";
 import VendorProfile from "./vendor/vendor-profile";
 
 const VendorPage = () => {
-  const queryClient = useQueryClient();
-  const [isPending, startTransition] = useTransition();
-  const vendorsQuery = useQuery(orpc.getVendors.queryOptions());
-  const productsQuery = useQuery(orpc.getProducts.queryOptions());
-  const supplyEntriesQuery = useQuery(orpc.getSupplyEntries.queryOptions());
-  const t = useQuery(orpc.getTransactions.queryOptions());
-
-  const createVendorMutation = useMutation(
-    orpc.createVendor.mutationOptions({
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: orpc.getVendors.queryKey() });
-      },
-    }),
-  );
-  const updateVendorMutation = useMutation(
-    orpc.updateVendor.mutationOptions({
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: orpc.getVendors.queryKey() });
-      },
-    }),
-  );
-  const deleteVendorMutation = useMutation(
-    orpc.deleteVendor.mutationOptions({
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: orpc.getVendors.queryKey() });
-      },
-    }),
-  );
-  const createProductMutation = useMutation(
-    orpc.createProduct.mutationOptions({
-      onSuccess: () => {
-        queryClient.invalidateQueries({
-          queryKey: orpc.getProducts.queryKey(),
-        });
-      },
-    }),
-  );
-  const updateProductMutation = useMutation(
-    orpc.updateProduct.mutationOptions({
-      onSuccess: () => {
-        queryClient.invalidateQueries({
-          queryKey: orpc.getProducts.queryKey(),
-        });
-      },
-    }),
-  );
-  const createSupplyEntryMutation = useMutation(
-    orpc.createSupplyEntry.mutationOptions({
-      onSuccess: () => {
-        queryClient.invalidateQueries({
-          queryKey: orpc.getSupplyEntries.queryKey(),
-        });
-        queryClient.invalidateQueries({
-          queryKey: orpc.getProducts.queryKey(),
-        });
-      },
-    }),
-  );
-  const updateSupplyEntryMutation = useMutation(
-    orpc.updateSupplyEntry.mutationOptions({
-      onSuccess: () => {
-        queryClient.invalidateQueries({
-          queryKey: orpc.getSupplyEntries.queryKey(),
-        });
-        queryClient.invalidateQueries({
-          queryKey: orpc.getProducts.queryKey(),
-        });
-      },
-    }),
-  );
-  const deleteSupplyEntryMutation = useMutation(
-    orpc.deleteSupplyEntry.mutationOptions({
-      onSuccess: () => {
-        queryClient.invalidateQueries({
-          queryKey: orpc.getSupplyEntries.queryKey(),
-        });
-        queryClient.invalidateQueries({
-          queryKey: orpc.getProducts.queryKey(),
-        });
-      },
-    }),
-  );
-
-  const vendors = vendorsQuery.data ?? [];
-  const products = productsQuery.data ?? [];
-  const supplies = supplyEntriesQuery.data ?? [];
+  const {
+    vendors,
+    products,
+    supplies,
+    transactions,
+    isPending,
+    startTransition,
+    createVendorMutation,
+    updateVendorMutation,
+    deleteVendorMutation,
+    createProductMutation,
+    updateProductMutation,
+    createSupplyEntryMutation,
+    updateSupplyEntryMutation,
+    deleteSupplyEntryMutation,
+  } = useVendorPage();
 
   // --- UI State ---
   const [activeTab, setActiveTab] = useState<"supplies" | "vendors">(
@@ -117,15 +44,12 @@ const VendorPage = () => {
   const [isBulkVendorModalOpen, setIsBulkVendorModalOpen] = useState(false);
   const [isVendorModalOpen, setIsVendorModalOpen] = useState(false);
 
-  // Edit states
   const [editingSupplyId, setEditingSupplyId] = useState<string | null>(null);
   const [editingVendorId, setEditingVendorId] = useState<string | null>(null);
 
-  // Delete confirmation state
   const [supplyToDelete, setSupplyToDelete] = useState<string | null>(null);
   const [vendorToDelete, setVendorToDelete] = useState<string | null>(null);
 
-  // --- Table Filter & Sort State ---
   const [searchTerm, setSearchTerm] = useState("");
   const [dateFilter, setDateFilter] = useState("");
   const [sortConfig, setSortConfig] = useState<{
@@ -149,7 +73,6 @@ const VendorPage = () => {
   };
 
   // --- Handlers ---
-
   const handleSort = (key: string) => {
     setSortConfig((current) => ({
       key,
@@ -475,7 +398,7 @@ const VendorPage = () => {
     const vendorProductIds = new Set(
       products.filter((p) => p.vendorId === selectedVendorId).map((p) => p.id),
     );
-    return t.data?.reduce((total, txn) => {
+    return transactions.reduce((total, txn) => {
       const txnCost = txn.items.reduce((itemTotal, item) => {
         if (vendorProductIds.has(item.productId)) {
           const product = products.find((p) => p.id === item.productId);
@@ -485,10 +408,10 @@ const VendorPage = () => {
       }, 0);
       return total + txnCost;
     }, 0);
-  }, [products, selectedVendorId, t.data]);
+  }, [products, selectedVendorId, transactions]);
 
   const vendorSales = useMemo(() => {
-    if (!selectedVendorId || !t.data) return [];
+    if (!selectedVendorId || !transactions) return [];
     const vendorProductIds = new Set(
       products.filter((p) => p.vendorId === selectedVendorId).map((p) => p.id),
     );
@@ -500,7 +423,7 @@ const VendorPage = () => {
       total: number;
     }[] = [];
 
-    t.data.forEach((txn) => {
+    transactions.forEach((txn) => {
       txn.items.forEach((item) => {
         if (vendorProductIds.has(item.productId)) {
           sales.push({
@@ -516,7 +439,7 @@ const VendorPage = () => {
     return sales.sort(
       (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
     );
-  }, [products, selectedVendorId, t.data]);
+  }, [products, selectedVendorId, transactions]);
 
   const supplyInitialValues = useMemo(() => {
     if (editingSupplyId) {
