@@ -79,11 +79,8 @@ const Analytics = () => {
 
   // 2. VENDOR'S TOTAL SALES (Total value of supplies purchased in period)
   const vendorsTotalSales = useMemo(() => {
-    return filteredSupplies.reduce(
-      (sum, s) => sum + s.costPrice * s.quantity,
-      0,
-    );
-  }, [filteredSupplies]);
+    return filteredTransactions.reduce((sum, s) => sum + s.total * 1, 0);
+  }, [filteredTransactions]);
 
   // 3. TOTAL VALUE OF UNSOLD ITEMS (Historical Inventory Value)
   const totalValueUnsoldItems = useMemo(() => {
@@ -152,7 +149,38 @@ const Analytics = () => {
     ],
     [totalValueSoldItems, vendorsTotalSales, totalValueUnsoldItems],
   );
+  const vendorSales1 = useMemo(() => {
+    const vendorProductIds = new Set(products.map((p) => p.id));
 
+    const sales: {
+      date: string;
+      name: string;
+      quantity: number;
+      total: number;
+    }[] = [];
+
+    transactions.forEach((txn) => {
+      txn.items.forEach((item) => {
+        if (vendorProductIds.has(item.productId)) {
+          const product = products.find((p) => p.id === item.productId);
+          sales.push({
+            date: txn.date,
+            name: item.name,
+            quantity: item.quantity,
+            total: item.quantity * (product?.costPrice ?? 0),
+          });
+        }
+      });
+    });
+
+    return sales.sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+    );
+  }, [products, transactions]);
+  const vendorsTotalSales1 = vendorSales1.reduce(
+    (acc, curr) => acc + curr.total,
+    0,
+  );
   const topSellingItems = useMemo(() => {
     const itemMap = new Map<string, number>();
     filteredTransactions.forEach((txn) => {
@@ -185,7 +213,6 @@ const Analytics = () => {
       </div>
     );
   }
-
   return (
     <div className="flex h-full animate-in flex-col gap-6 overflow-y-auto pr-2 pb-4 duration-300 fade-in">
       <AnalyticsHeader dateRange={dateRange} setDateRange={setDateRange} />
@@ -208,7 +235,7 @@ const Analytics = () => {
         />
         <MetricCard
           title="VENDOR'S TOTAL SALES"
-          value={vendorsTotalSales}
+          value={vendorsTotalSales1}
           icon={CreditCard}
           colorClass="bg-[#FFCDCD] text-red-600"
           subText="Supplies purchased in period"
@@ -216,7 +243,10 @@ const Analytics = () => {
         <MetricCard
           title="TOTAL PROFIT MARGIN"
           value={
-            totalValueSoldItems + totalValueUnsoldItems - vendorsTotalSales
+            totalValueSoldItems +
+            totalValueUnsoldItems +
+            totalDebtMatrix -
+            vendorsTotalSales1
           }
           icon={TrendingUp}
           colorClass="bg-[#CDDDFF] text-blue-600"

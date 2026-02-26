@@ -426,11 +426,12 @@ const VendorPage = () => {
     transactions.forEach((txn) => {
       txn.items.forEach((item) => {
         if (vendorProductIds.has(item.productId)) {
+          const product = products.find((p) => p.id === item.productId);
           sales.push({
             date: txn.date,
             name: item.name,
             quantity: item.quantity,
-            total: item.quantity * item.priceAtSale,
+            total: item.quantity * (product?.costPrice ?? 0),
           });
         }
       });

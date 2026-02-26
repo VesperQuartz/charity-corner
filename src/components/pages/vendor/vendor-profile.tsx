@@ -1,6 +1,19 @@
 "use client";
 
-import { ArrowLeft, Clock, Edit2, Layers, Mail, Package, Phone, Plus, Trash2, Calendar, X, ShoppingCart } from "lucide-react";
+import {
+  ArrowLeft,
+  Calendar,
+  Clock,
+  Edit2,
+  Layers,
+  Mail,
+  Package,
+  Phone,
+  Plus,
+  ShoppingCart,
+  Trash2,
+  X,
+} from "lucide-react";
 import React, { useMemo, useState } from "react";
 
 interface VendorProfileProps {
@@ -33,6 +46,7 @@ const VendorProfile = ({
 
   const filteredSales = useMemo(() => {
     if (!salesDateFilter) return vendorSales;
+    console.log("V", vendorSales);
     return vendorSales.filter((s) => s.date.startsWith(salesDateFilter));
   }, [vendorSales, salesDateFilter]);
 
@@ -81,8 +95,12 @@ const VendorProfile = ({
             </div>
           </div>
 
-          <h3 className="mb-1 text-xl font-bold text-gray-900">{vendor.name}</h3>
-          <p className="mb-6 font-mono text-sm text-gray-400">ID: {vendor.id}</p>
+          <h3 className="mb-1 text-xl font-bold text-gray-900">
+            {vendor.name}
+          </h3>
+          <p className="mb-6 font-mono text-sm text-gray-400">
+            ID: {vendor.id}
+          </p>
 
           <div className="space-y-4">
             <div className="flex items-center gap-3 text-gray-600">
@@ -145,9 +163,9 @@ const VendorProfile = ({
             </button>
           </div>
 
-          <div className="flex-1 overflow-hidden flex flex-col">
+          <div className="flex flex-1 flex-col overflow-hidden">
             {activeTab === "supplies" ? (
-              <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex flex-1 flex-col overflow-hidden">
                 <div className="flex items-center justify-between border-b border-gray-100 bg-white p-4">
                   <span className="text-xs font-normal text-gray-500">
                     Total COGS:{" "}
@@ -191,14 +209,22 @@ const VendorProfile = ({
                     <tbody>
                       {supplies.length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="px-6 py-8 text-center text-gray-400">
+                          <td
+                            colSpan={5}
+                            className="px-6 py-8 text-center text-gray-400"
+                          >
                             No supply history recorded for this vendor.
                           </td>
                         </tr>
                       ) : (
                         supplies.map((supply) => (
-                          <tr key={supply.id} className="border-b hover:bg-gray-50">
-                            <td className="px-6 py-3 whitespace-nowrap">{supply.date}</td>
+                          <tr
+                            key={supply.id}
+                            className="border-b hover:bg-gray-50"
+                          >
+                            <td className="px-6 py-3 whitespace-nowrap">
+                              {supply.date}
+                            </td>
                             <td className="px-6 py-3 font-medium text-gray-800">
                               {supply.productName}
                               {supply.purchaseOrderNumber && (
@@ -231,7 +257,7 @@ const VendorProfile = ({
                 </div>
               </div>
             ) : (
-              <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex flex-1 flex-col overflow-hidden">
                 {/* Sales Filter */}
                 <div className="flex items-center justify-between border-b border-gray-100 bg-white p-4">
                   <div className="flex items-center gap-2">
@@ -270,34 +296,51 @@ const VendorProfile = ({
                     <tbody>
                       {filteredSales.length === 0 ? (
                         <tr>
-                          <td colSpan={4} className="px-6 py-8 text-center text-gray-400">
+                          <td
+                            colSpan={4}
+                            className="px-6 py-8 text-center text-gray-400"
+                          >
                             No sales records found for this vendor.
                           </td>
                         </tr>
                       ) : (
-                        filteredSales.map((sale, idx) => (
-                          <tr key={`${sale.date}-${sale.name}-${idx}`} className="border-b hover:bg-gray-50">
-                            <td className="px-6 py-3 whitespace-nowrap">
-                              {new Date(sale.date).toLocaleDateString()}
-                              <span className="block text-xs text-gray-400">
-                                {new Date(sale.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              </span>
-                            </td>
-                            <td className="px-6 py-3 font-medium text-gray-800">{sale.name}</td>
-                            <td className="px-6 py-3 text-center font-medium text-gray-900">
-                              {sale.quantity}
-                            </td>
-                            <td className="px-6 py-3 text-right font-mono font-bold text-green-600">
-                              ₦{sale.total.toFixed(2)}
-                            </td>
-                          </tr>
-                        ))
+                        filteredSales.map((sale, idx) => {
+                          console.log(sale);
+                          return (
+                            <tr
+                              key={`${sale.date}-${sale.name}-${idx}`}
+                              className="border-b hover:bg-gray-50"
+                            >
+                              <td className="px-6 py-3 whitespace-nowrap">
+                                {new Date(sale.date).toLocaleDateString()}
+                                <span className="block text-xs text-gray-400">
+                                  {new Date(sale.date).toLocaleTimeString([], {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                                </span>
+                              </td>
+                              <td className="px-6 py-3 font-medium text-gray-800">
+                                {sale.name}
+                              </td>
+                              <td className="px-6 py-3 text-center font-medium text-gray-900">
+                                {sale.quantity}
+                              </td>
+                              <td className="px-6 py-3 text-right font-mono font-bold text-green-600">
+                                ₦{sale.total.toFixed(2)}
+                              </td>
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                     {filteredSales.length > 0 && (
                       <tfoot className="sticky bottom-0 bg-gray-50 font-bold text-gray-900 shadow-[0_-1px_0_rgba(0,0,0,0.05)]">
                         <tr>
-                          <td colSpan={3} className="px-6 py-4 text-right uppercase text-xs tracking-wider">
+                          <td
+                            colSpan={3}
+                            className="px-6 py-4 text-right text-xs tracking-wider uppercase"
+                          >
                             Accumulated Total Vendor Sales:
                           </td>
                           <td className="px-6 py-4 text-right font-mono text-lg text-pink-600">

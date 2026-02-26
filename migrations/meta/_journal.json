@@ -15,6 +15,13 @@
       "when": 1771676942321,
       "tag": "0001_petite_electro",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1772098517440,
+      "tag": "0002_absurd_red_wolf",
+      "breakpoints": true
     }
   ]
 }
